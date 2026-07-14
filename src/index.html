@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
+  <title>Flourish</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- particle overlay; sits above text, ignores clicks -->
+  <canvas id="fx-canvas"></canvas>
+
+  <div id="app">
+    <header id="titlebar">
+      <div class="brand"><span class="brand-mark">✦</span> Flourish</div>
+      <div class="status">
+        <span id="status-dot" class="dot"></span>
+        <span id="status-text">starting…</span>
+      </div>
+      <button id="settings-btn" title="Settings" aria-label="Settings">⚙</button>
+    </header>
+
+    <main id="screen" tabindex="0">
+      <div id="transcript"></div>
+    </main>
+
+    <form id="input-row" autocomplete="off">
+      <span class="prompt-sigil">&gt;</span>
+      <input id="input" type="text" spellcheck="false"
+             placeholder="Type a message and press Enter…" autofocus />
+      <button id="send-btn" type="submit">send</button>
+    </form>
+  </div>
+
+  <!-- settings -->
+  <div id="settings-overlay" class="hidden">
+    <div id="settings-panel">
+      <h2>Connect to Claude Code on your VM</h2>
+      <p class="settings-lede">Flourish SSHes into your Ubuntu VM and runs <code>claude</code> there.
+        No key goes in this app — Claude Code uses whatever auth it already has on the VM.</p>
+
+      <div class="row">
+        <label class="field grow"><span>Host / IP</span>
+          <input id="cfg-host" type="text" placeholder="100.x.x.x or vm.example.net" spellcheck="false" /></label>
+        <label class="field w-port"><span>Port</span>
+          <input id="cfg-port" type="number" min="1" max="65535" value="22" /></label>
+      </div>
+
+      <label class="field"><span>Username</span>
+        <input id="cfg-user" type="text" placeholder="aiops" spellcheck="false" /></label>
+
+      <label class="field"><span>Authentication</span>
+        <select id="cfg-auth">
+          <option value="key">Private key file</option>
+          <option value="password">Password</option>
+          <option value="agent">SSH agent (Pageant / OpenSSH)</option>
+        </select></label>
+
+      <div id="auth-key" class="auth-block">
+        <label class="field"><span>Private key path</span>
+          <input id="cfg-keypath" type="text" placeholder="C:\Users\you\.ssh\id_ed25519" spellcheck="false" /></label>
+        <label class="field"><span>Key passphrase (if any)</span>
+          <input id="cfg-passphrase" type="password" spellcheck="false" /></label>
+      </div>
+      <div id="auth-password" class="auth-block hidden">
+        <label class="field"><span>Password</span>
+          <input id="cfg-password" type="password" spellcheck="false" /></label>
+      </div>
+
+      <div class="row">
+        <label class="field grow"><span>Working directory on VM (optional)</span>
+          <input id="cfg-cwd" type="text" placeholder="/var/www/simjim" spellcheck="false" /></label>
+        <label class="field w-model"><span>Model (optional)</span>
+          <input id="cfg-model" type="text" placeholder="default" spellcheck="false" /></label>
+      </div>
+
+      <label class="field checkbox">
+        <input id="cfg-bypass" type="checkbox" checked />
+        <span>Bypass permissions — let Claude Code run tools without prompting (<code>--permission-mode bypassPermissions</code>)</span>
+      </label>
+      <label class="field checkbox">
+        <input id="cfg-demo" type="checkbox" />
+        <span>Demo mode — scripted replies, no VM required (just show the effects)</span>
+      </label>
+
+      <div id="test-result" class="test-result"></div>
+      <div class="settings-actions">
+        <button id="settings-test" type="button" class="ghost">Test connection</button>
+        <span class="spacer"></span>
+        <button id="settings-cancel" type="button" class="ghost">Cancel</button>
+        <button id="settings-save" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="flourish.js"></script>
+  <script src="effects.js"></script>
+  <script src="inputfx.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

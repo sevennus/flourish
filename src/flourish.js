@@ -1,0 +1,166 @@
+/*
+ * flourish.js — the Flourish protocol parser.
+ *
+ * Pure, dependency-free, and streaming-safe: you feed it text as it arrives
+ * (possibly one character at a time, possibly with a directive split across
+ * two chunks) and it emits an ordered list of events. It never renders and
+ * never touches the DOM, so it runs identically in the browser renderer and
+ * under `node --test`.
+ *
+ * The model embeds directives in its replies; the app strips them from the
+ * visible text and turns them into effects at the exact point they appear:
+ *
+ *   Point effects (fire once, at the current caret):
+ *     {{fx:spark}} {{fx:confetti}} {{fx:fireworks}} {{fx:ripple}}
+ *     {{fx:pulse}} {{fx:shake}} {{fx:matrix}} {{fx:lightning}} {{fx:nova}}
+ *     {{fx:meteor}} {{fx:embers}} {{fx:vortex}} {{fx:glitch}}
+ *
+ *   Text spans (style the wrapped characters):
+ *     {{fx:shimmer}}...{{/fx:shimmer}}   {{fx:rainbow}}...{{/fx:rainbow}}
+ *     {{fx:glow}}...{{/fx:glow}}         {{fx:wave}}...{{/fx:wave}}
+ *     {{fx:fire}}...{{/fx:fire}}         {{fx:neon}}...{{/fx:neon}}
+ *     {{fx:scramble}}...{{/fx:scramble}} {{fx:bounce}}...{{/fx:bounce}}
+ *     {{fx:color #ff0066}}...{{/fx:color}}
+ *
+ * Emitted events:
+ *     { t: 'text',        value: '<string>' }
+ *     { t: 'effect',      name: '<name>', args: '<raw args string>' }
+ *     { t: 'style-start', name: '<name>', args: '<raw args string>' }
+ *     { t: 'style-end',   name: '<name>' }
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.Flourish = api;
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // Which directive names are point effects vs. wrapping style spans.
+  const POINT_EFFECTS = new Set([
+    'spark', 'confetti', 'fireworks', 'ripple', 'pulse', 'shake', 'matrix',
+    'lightning', 'nova', 'meteor', 'embers', 'vortex', 'glitch',
+  ]);
+  const STYLE_SPANS = new Set([
+    'shimmer', 'rainbow', 'glow', 'wave', 'color',
+    'fire', 'neon', 'scramble', 'bounce',
+  ]);
+
+  // Spans rendered one <i> per character (staggered animation or per-char JS)
+  // rather than as a single styled span. The renderer needs this; it lives here
+  // so the vocabulary stays in one place.
+  const PER_CHAR_SPANS = new Set(['wave', 'bounce', 'scramble']);
+
+  // A directive can't be longer than this; if we buffer `{{` and never find a
+  // closing `}}` within this many chars, we give up and flush it as literal
+  // text. Keeps a stray `{{` in normal prose from swallowing the whole reply.
+  const MAX_TOKEN_LEN = 64;
+
+  const ALL_NAMES = new Set([...POINT_EFFECTS, ...STYLE_SPANS]);
+
+  class FlourishParser {
+    constructor() {
+      // buf holds a candidate directive once we've seen an opening `{{`.
+      // It always starts with the two `{` we've consumed.
+      this.buf = '';
+      this.inToken = false;
+    }
+
+    /**
+     * Feed a chunk of text. Returns an array of events for what could be
+     * fully resolved; any trailing partial directive is retained internally
+     * until the next feed() or flush().
+     */
+    feed(text) {
+      const out = [];
+      let plain = ''; // accumulate literal chars, flush as one text event
+
+      const flushPlain = () => {
+        if (plain) { out.push({ t: 'text', value: plain }); plain = ''; }
+      };
+
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+
+        if (!this.inToken) {
+          if (ch === '{') {
+            // Could be the start of `{{`. Peek ahead within this chunk; if the
+            // next char isn't available yet, stash a pending single brace.
+            if (this._pendingBrace) {
+              // We had a lone `{` from before and now another `{` -> token.
+              this._pendingBrace = false;
+              this.inToken = true;
+              this.buf = '{{';
+            } else {
+              this._pendingBrace = true;
+            }
+          } else {
+            if (this._pendingBrace) {
+              // The earlier `{` was not part of `{{` — it's literal.
+              plain += '{';
+              this._pendingBrace = false;
+            }
+            plain += ch;
+          }
+          continue;
+        }
+
+        // We're inside a candidate directive.
+        this.buf += ch;
+        if (this.buf.endsWith('}}')) {
+          // Directive closed. Resolve it.
+          flushPlain();
+          const ev = this._resolve(this.buf);
+          if (ev) out.push(ev);
+          else out.push({ t: 'text', value: this.buf }); // not a real directive
+          this.buf = '';
+          this.inToken = false;
+        } else if (this.buf.length > MAX_TOKEN_LEN) {
+          // Too long to be a directive — flush what we buffered as literal.
+          flushPlain();
+          out.push({ t: 'text', value: this.buf });
+          this.buf = '';
+          this.inToken = false;
+        }
+      }
+
+      flushPlain();
+      return out;
+    }
+
+    /**
+     * Call when the stream is complete. Emits any buffered partial as literal
+     * text so nothing is silently dropped.
+     */
+    flush() {
+      const out = [];
+      if (this._pendingBrace) { out.push({ t: 'text', value: '{' }); this._pendingBrace = false; }
+      if (this.inToken && this.buf) { out.push({ t: 'text', value: this.buf }); }
+      this.buf = '';
+      this.inToken = false;
+      return out;
+    }
+
+    // Turn a fully-buffered `{{...}}` string into an event, or null if it isn't
+    // a recognized directive.
+    _resolve(tok) {
+      const inner = tok.slice(2, -2).trim(); // strip {{ }}
+      if (inner.startsWith('/')) {
+        const rest = inner.slice(1).trim();
+        if (!rest.startsWith('fx:')) return null;
+        const name = rest.slice(3).trim().toLowerCase();
+        if (!STYLE_SPANS.has(name)) return null;
+        return { t: 'style-end', name };
+      }
+      if (!inner.startsWith('fx:')) return null;
+      const body = inner.slice(3).trim();
+      const sp = body.indexOf(' ');
+      const name = (sp === -1 ? body : body.slice(0, sp)).toLowerCase();
+      const args = sp === -1 ? '' : body.slice(sp + 1).trim();
+      if (!ALL_NAMES.has(name)) return null;
+      if (POINT_EFFECTS.has(name)) return { t: 'effect', name, args };
+      return { t: 'style-start', name, args };
+    }
+  }
+
+  return { FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS };
+});

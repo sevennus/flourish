@@ -1,0 +1,23 @@
+{
+  "name": "flourish",
+  "productName": "Flourish",
+  "version": "0.1.0",
+  "description": "A PuTTY-style Windows terminal that chats with Claude and draws visual flourishes the model directs inline.",
+  "main": "main.js",
+  "author": "jim",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "screenshot": "xvfb-run -a electron . --screenshot",
+    "fx-shots": "xvfb-run -a electron tools/fx-shots.js --no-sandbox",
+    "package:win": "electron-packager . Flourish --platform=win32 --arch=x64 --out=dist --overwrite --app-version=0.1.0 --prune=true"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.0.2",
+    "electron": "^43.1.0"
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  }
+}
