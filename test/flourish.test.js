@@ -269,9 +269,11 @@ test('the vocabulary is the full 50 effects', () => {
 });
 
 test('the consuming spans are taught with their guardrail', () => {
-  // burn/cascade destroy text the reader can't get back. The engine will
-  // happily eat a load-bearing sentence — the only thing stopping it is this
-  // paragraph, so its absence is a real defect, not a docs nit.
+  // burn/cascade destroy text on screen: cascade takes the characters away for
+  // good, and burn leaves them as legible-but-ruined ash. Ash being readable
+  // makes a mistake recoverable, not acceptable — burning still says "this is
+  // dead". The engine will happily eat a load-bearing sentence, and the only
+  // thing stopping it is this paragraph, so its absence is a real defect.
   const { CONSUMING_SPANS } = require('../src/flourish');
   for (const n of CONSUMING_SPANS) {
     assert.ok(FLOURISH_SYSTEM_PROMPT.includes(`{{fx:${n}}}`), `prompt never teaches ${n}`);

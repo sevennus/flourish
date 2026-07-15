@@ -8,6 +8,7 @@
   --user: #ffd27a;
   --err: #ff6b7d;
   --line: #142019;
+  --ash: #6f665e;
   --mono: "Cascadia Code", "JetBrains Mono", "Consolas", "DejaVu Sans Mono", ui-monospace, monospace;
 }
 
@@ -362,9 +363,12 @@ body {
   display: inline-block; font-style: normal;
   will-change: transform, opacity, color;
 }
-/* A burnt-out span keeps its width, so the paragraph never reflows around the
-   hole it just ate — see the header of textfx.js. */
-.fx-burn[data-burnt="1"] > i { opacity: 0; }
+/* Fire leaves ash, not a hole. A burnt character keeps its width so the
+   paragraph never reflows (see the header of textfx.js) AND stays legible: it
+   comes to rest as spent grey rather than vanishing, so the line can still be
+   read after it's been eaten. textfx.js reads --ash rather than hardcoding it,
+   so this backstop and the animation land on the same colour. */
+.fx-burn[data-burnt="1"] > i { color: var(--ash); opacity: 1; text-shadow: none; }
 
 /* The bytes underneath the text (renderer.js swaps the glyph, then .settled) */
 .fx-hexdump { display: inline-block; }

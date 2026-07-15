@@ -11,15 +11,21 @@
  *   burn     — a character catches, and fire spreads outward from it. Wind
  *              makes the spread asymmetric: downwind it races, upwind it
  *              creeps. Each character goes ignite → white-hot → charcoal →
- *              gone, shedding embers at its peak and ash as it dies.
+ *              ash, shedding embers at its peak and ash as it dies.
  *   cascade  — characters detach and fall away as Matrix glyphs.
  *
  * Two things are load-bearing:
  *
  * 1. CONSUMED CHARACTERS KEEP THEIR BOX. The <i> is never removed and never
- *    display:none — it goes to opacity 0 in place. Removing it would reflow the
- *    paragraph mid-burn and the text would visibly jump around while it's being
- *    eaten, which looks like a bug rather than like fire.
+ *    display:none — it stays in place. Removing it would reflow the paragraph
+ *    mid-burn and the text would visibly jump around while it's being eaten,
+ *    which looks like a bug rather than like fire.
+ *
+ *    Burn and cascade differ in what they leave there. Burn settles to a
+ *    readable ash grey: the fire ruins the text, it doesn't delete it, and a
+ *    burnt line can still be read afterwards. Cascade really does take the
+ *    character away — the glyph detaches onto the canvas and falls, so the DOM
+ *    copy blanking to opacity 0 is the point rather than a shortcut.
  *
  * 2. RECTS ARE READ SPARINGLY. getBoundingClientRect() forces layout, and the
  *    typewriter is still appending text below, so a rect read per character per
@@ -32,13 +38,51 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const chance = (p) => Math.random() < p;
 
-  // How long one character takes to go from catching to gone.
-  const RISE_MS = 190;     // ignite → peak
-  const FALL_MS = 520;     // peak → charcoal
-  const ASH_MS = 340;      // charcoal → gone
+  // How long one character takes to go from catching to spent. The flame is the
+  // slow part on purpose: a character that catches should be alight long enough
+  // to watch it burn, not blink. The fire still spreads between characters at
+  // its own pace (planBurn), so a longer flame means more of the span is alight
+  // at once — a flame front rather than a travelling dot.
+  const RISE_MS = 260;     // ignite → peak
+  const FALL_MS = 980;     // peak → charcoal
+  const ASH_MS = 620;      // charcoal → ashed over
 
   const EMBER = ['#fff3b0', '#ffd27a', '#ff9d3c', '#ff5c2a', '#ff3860'];
   const ASH = ['#4a4038', '#6b5f54', '#332c26'];
+
+  const parseHex = (s) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(s || '').trim());
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  };
+  const mix = (a, b, k) => ({
+    r: a.r + (b.r - a.r) * k, g: a.g + (b.g - a.g) * k, b: a.b + (b.b - a.b) * k,
+  });
+  const hex = (c) =>
+    '#' + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+
+  const CHARCOAL = parseHex('#3b322c');
+
+  // Where a burnt character comes to rest. Fire leaves ash, not a hole: the
+  // characters stay readable as spent grey, dimmer than the UI's own dim text
+  // but nowhere near the near-black background. Burning has to read as "this is
+  // gone" without actually costing the reader the characters.
+  //
+  // The colour itself lives in styles.css as --ash, so this and the
+  // [data-burnt] backstop rule there can't drift apart. Read once, on first
+  // use: it's a computed-style read, and it can't run at module scope because
+  // this file loads before the stylesheet has necessarily applied.
+  let restCache = null;
+  function restColor() {
+    if (restCache) return restCache;
+    let v = '';
+    try {
+      v = getComputedStyle(document.documentElement).getPropertyValue('--ash');
+    } catch (e) { /* no document (tests, headless) — fall through */ }
+    restCache = parseHex(v) || parseHex('#6f665e');
+    return restCache;
+  }
 
   // Colour of a character at a given heat (0 cold → 1 white-hot).
   function heatColor(h) {
@@ -117,12 +161,15 @@
               });
             }
           } else if (age <= RISE_MS + FALL_MS + ASH_MS) {
-            // Charcoal, crumbling.
+            // The ember dies dark, then ashes over — the character comes back
+            // up as a spent grey instead of fading out of existence. It never
+            // touches opacity: legibility here is all colour, so the resting
+            // state is exactly --ash rather than --ash washed toward the
+            // background by a half-faded alpha.
             const k = (age - RISE_MS - FALL_MS) / ASH_MS;
-            c.style.color = '#3b322c';
+            c.style.color = hex(mix(CHARCOAL, restColor(), k));
             c.style.textShadow = 'none';
-            c.style.opacity = (1 - k).toFixed(2);
-            c.style.transform = `translateY(${(k * 3).toFixed(2)}px) scale(${(1 - k * 0.25).toFixed(3)})`;
+            c.style.transform = `translateY(${(k * 1.5).toFixed(2)}px) scale(${(1 - k * 0.06).toFixed(3)})`;
             if (!s.ashed && k > 0.25) {
               s.ashed = true;
               this.effects.emit(s.rect.x, s.rect.y, {
@@ -135,8 +182,9 @@
               });
             }
           } else {
-            // Gone — but still occupying its box, so nothing reflows.
-            c.style.opacity = '0';
+            // Spent, not deleted: a legible grey ghost, still in its own box.
+            c.style.color = hex(restColor());
+            c.style.transform = 'translateY(1.5px) scale(0.94)';
           }
         }
         if (el < total) requestAnimationFrame(step);

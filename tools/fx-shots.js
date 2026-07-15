@@ -188,13 +188,29 @@ async function run() {
       return span.children.length;
     })();`);
 
+  // The span stamps data-burnt when its last character finishes, so wait for
+  // that rather than guessing a total: the ignition seed is random and a gale's
+  // upwind crawl swings the length by seconds between runs.
+  const waitForBurnt = () => win.webContents.executeJavaScript(`
+    new Promise((res) => {
+      const t = setInterval(() => {
+        const s = document.querySelector('.fx-burn');
+        if (s && s.dataset.burnt === '1') { clearInterval(t); res(true); }
+      }, 80);
+      setTimeout(() => { clearInterval(t); res(false); }, 25000);
+    });`);
+
   await layout('burn', 'this idea is dead and gone', 'right gale');
-  for (const [label, at] of [['burn-1-catch', 260], ['burn-2-spread', 560], ['burn-3-ash', 1100]]) {
-    await wait(at === 260 ? at : 300);
+  // Absolute times from ignition — one character's arc is catch → peak 260ms →
+  // charcoal 1240ms → ash 1860ms, and the front is crossing the span meanwhile.
+  const burnT0 = Date.now();
+  for (const [label, at] of [['burn-1-catch', 300], ['burn-2-spread', 900], ['burn-3-ash', 1800]]) {
+    await wait(Math.max(0, at - (Date.now() - burnT0)));
     await shoot(win, label);
   }
-  await wait(900);
-  await shoot(win, 'burn-4-consumed');
+  if (!(await waitForBurnt())) console.log('  ! burn never settled — shot may be mid-animation');
+  await wait(200);
+  await shoot(win, 'burn-4-ashed');
 
   await reset();
   await layout('cascade', 'scrolling out of existence', 'right');
