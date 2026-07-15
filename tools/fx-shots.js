@@ -52,6 +52,32 @@ const SPANS = '{{fx:glow}}glow{{/fx:glow}} {{fx:shimmer}}shimmer{{/fx:shimmer}} 
 // One frame per palette, so a recolour that silently does nothing is visible.
 const PALETTE_SHOTS = ['mint', 'ice', 'gold', 'ember', 'violet', 'rose', 'mono'];
 
+// The text-effects reference sheet: every style span, rendered in its own
+// style, with what it means. Must cover STYLE_SPANS exactly — a test enforces
+// that, so a new span can't ship without appearing in the reference.
+const SHEET = [
+  ['glow', 'a key result'],
+  ['shimmer', 'polished, elegant'],
+  ['chrome', 'hard, engineered, machined'],
+  ['rainbow', 'playful, celebratory'],
+  ['sparkle', 'delightful, a little magic'],
+  ['fire', 'hot, urgent, fast'],
+  ['neon', 'a name, a label, a sign'],
+  ['flicker', 'unstable, failing'],
+  ['corrupt', 'broken data, garbage'],
+  ['ghost', 'an aside, a maybe'],
+  ['wave', 'lilting, rolling'],
+  ['bounce', 'upbeat'],
+  ['stamp', 'a verdict, final'],
+  ['scramble', 'decodes into place — reveals'],
+  ['hexdump', 'raw bytes, low-level'],
+  ['hologram', 'projected, virtual, not real'],
+  ['redact', 'a bar slides away — a reveal'],
+  ['color', 'any specific colour'],
+  ['burn', 'CONSUMES — spreads on the wind'],
+  ['cascade', 'CONSUMES — falls away as glyphs'],
+];
+
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function shoot(win, name) {
@@ -217,6 +243,71 @@ async function run() {
   await wait(620);
   await shoot(win, 'cascade');
   await wait(400);
+  await reset();
+  await win.webContents.executeJavaScript(`document.getElementById('transcript').innerHTML = ''; true;`);
+
+  // A labelled contact sheet of every text span — the reference image. Unlike
+  // spans.png (which is a smoke test that the CSS applies at all), this one has
+  // to include burn and cascade, so it fires them and captures mid-flight.
+  console.log('text-effects contact sheet:');
+  await reset();
+  await win.webContents.executeJavaScript(`
+    (function () {
+      const SPANS = ${JSON.stringify(SHEET)};
+      const t = document.getElementById('transcript');
+      t.innerHTML = '';
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:9px 34px;padding:6px 4px;';
+      const PC = window.Flourish.PER_CHAR_SPANS;
+      window.__sheetSpans = {};
+      for (const [name, desc] of SPANS) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:baseline;gap:12px;';
+        const s = document.createElement('span');
+        s.dataset.fx = name;
+        if (name === 'color') s.style.color = '#ff5cad'; else s.className = 'fx-' + name;
+        s.style.cssText += ';font-size:23px;min-width:148px;';
+        const label = name === 'color' ? 'color #ff5cad' : name;
+        if (PC.has(name)) {
+          let n = 0;
+          for (const ch of label) {
+            const i = document.createElement('i');
+            i.textContent = ch;
+            if (name !== 'burn' && name !== 'cascade' && name !== 'scramble' && name !== 'hexdump') {
+              i.style.animationDelay = ((n++ % 24) * 0.05).toFixed(2) + 's';
+            }
+            s.appendChild(i);
+          }
+        } else {
+          s.textContent = label;
+        }
+        const d = document.createElement('em');
+        d.textContent = desc;
+        d.style.cssText = 'color:#6f8a7d;font-style:normal;font-size:12.5px;';
+        row.appendChild(s); row.appendChild(d);
+        wrap.appendChild(row);
+        window.__sheetSpans[name] = s;
+      }
+      t.appendChild(wrap);
+      return Object.keys(window.__sheetSpans).length;
+    })();`);
+  await wait(400);
+  // Light the fuse on the two destructive ones. They're staggered on purpose:
+  // cascade empties its label in ~400ms, so firing both together and waiting
+  // long enough to see fire means cascade has already finished eating itself
+  // and its row is blank. Start burn first, cascade late, catch both alight.
+  const play = (n, args) => win.webContents.executeJavaScript(`
+    (function () {
+      window.__tfx = window.__tfx || new window.FlourishTextFX(window.__fx);
+      window.__tfx.play('${n}', window.__sheetSpans.${n}, ${JSON.stringify(args)});
+      return true;
+    })();`);
+  await play('burn', 'right breeze');
+  await wait(300);
+  await play('cascade', 'right');
+  await wait(180);
+  await shoot(win, 'text-effects');
+  await wait(300);
   await reset();
   await win.webContents.executeJavaScript(`document.getElementById('transcript').innerHTML = ''; true;`);
 

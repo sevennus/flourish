@@ -263,6 +263,20 @@ test('the system prompt teaches exactly the vocabulary the parser accepts', () =
   }
 });
 
+test('the text-effects reference sheet covers every style span', () => {
+  // assets/fx/text-effects.png is what gets shown to people as "here are the
+  // text effects". A span missing from the sheet is a span nobody knows exists.
+  const src = read('tools/fx-shots.js');
+  const block = src.slice(src.indexOf('const SHEET = ['), src.indexOf('const wait ='));
+  const listed = new Set([...block.matchAll(/\['([a-z]+)',/g)].map((m) => m[1]));
+  for (const n of STYLE_SPANS) {
+    assert.ok(listed.has(n), `the reference sheet never shows ${n}`);
+  }
+  for (const n of listed) {
+    assert.ok(STYLE_SPANS.has(n), `the reference sheet shows unknown span ${n}`);
+  }
+});
+
 test('the vocabulary is the full 50 effects', () => {
   assert.strictEqual(POINT_EFFECTS.size, 30);
   assert.strictEqual(STYLE_SPANS.size, 20);
