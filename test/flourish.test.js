@@ -5,7 +5,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS } = require('../src/flourish');
+const {
+  FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, PALETTES, SIZES, parseArgs,
+} = require('../src/flourish');
 const { pickDemoResponse, SHOWCASE, RESPONSES } = require('../src/demo');
 const { FLOURISH_SYSTEM_PROMPT } = require('../src/prompt');
 
@@ -143,6 +145,55 @@ test('the new effects all parse and strip cleanly', () => {
   assert.strictEqual(events.filter((e) => e.t === 'style-start').length, 4);
 });
 
+test('every point effect parses on its own and leaves no text', () => {
+  for (const n of POINT_EFFECTS) {
+    const { text, events } = parseAll(`{{fx:${n}}}`);
+    assert.strictEqual(text, '', `${n} left visible text behind`);
+    assert.strictEqual(events.length, 1, `${n} did not emit exactly one event`);
+    assert.strictEqual(events[0].t, 'effect');
+    assert.strictEqual(events[0].name, n);
+  }
+});
+
+test('every style span round-trips its wrapped text', () => {
+  for (const n of STYLE_SPANS) {
+    const { text, events } = parseAll(`{{fx:${n}}}x{{/fx:${n}}}`);
+    assert.strictEqual(text, 'x', `${n} lost its text`);
+    assert.deepStrictEqual(events.map((e) => e.t), ['style-start', 'text', 'style-end'], `${n} span is unbalanced`);
+  }
+});
+
+// ---- point-effect args ----
+
+test('point effects carry a palette and a size arg', () => {
+  const { events } = parseAll('{{fx:swarm violet lg}}');
+  assert.strictEqual(events[0].name, 'swarm');
+  assert.strictEqual(events[0].args, 'violet lg');
+  const a = parseArgs(events[0].args);
+  assert.strictEqual(a.palette, 'violet');
+  assert.strictEqual(a.scale, SIZES.lg);
+});
+
+test('args parse in either order, and default when absent', () => {
+  assert.deepStrictEqual(parseArgs('lg gold'), { palette: 'gold', scale: SIZES.lg });
+  assert.deepStrictEqual(parseArgs('gold lg'), { palette: 'gold', scale: SIZES.lg });
+  assert.deepStrictEqual(parseArgs(''), { palette: null, scale: 1 });
+  assert.deepStrictEqual(parseArgs(undefined), { palette: null, scale: 1 });
+});
+
+test('a bogus arg degrades to the default instead of killing the effect', () => {
+  // The model will typo one of these eventually; it must not cost us the effect.
+  assert.deepStrictEqual(parseArgs('chartreuse enormous'), { palette: null, scale: 1 });
+  assert.deepStrictEqual(parseArgs('chartreuse lg'), { palette: null, scale: SIZES.lg });
+  const { text, events } = parseAll('{{fx:spark chartreuse}}');
+  assert.strictEqual(text, '');
+  assert.strictEqual(events[0].name, 'spark');
+});
+
+test('args are case-insensitive', () => {
+  assert.deepStrictEqual(parseArgs('GOLD XL'), { palette: 'gold', scale: SIZES.xl });
+});
+
 // The seams below are where this thing silently breaks: a name can exist in the
 // parser but have no engine case / no CSS rule / no mention in the system
 // prompt, and the effect just never plays with nothing to show for it.
@@ -168,6 +219,40 @@ test('per-char spans are a subset of the style spans', () => {
   }
 });
 
+test('per-char spans style their <i> children, not just the wrapper', () => {
+  // A per-char span renders one <i> per character; CSS that targets only
+  // `.fx-name` and never `.fx-name > i` animates the whole run as one block —
+  // which is exactly the thing per-char rendering exists to avoid, and it fails
+  // silently.
+  const css = read('src/styles.css');
+  for (const n of PER_CHAR_SPANS) {
+    assert.ok(new RegExp(`\\.fx-${n}\\s*>\\s*i`).test(css), `styles.css has no .fx-${n} > i rule`);
+  }
+});
+
+test('every palette the parser accepts exists in the engine', () => {
+  // `{{fx:spark gold}}` where the engine has no gold would silently paint the
+  // default and nobody would ever know the arg was dead.
+  const src = read('src/effects.js');
+  const block = src.slice(src.indexOf('const PALETTES = {'), src.indexOf('const PARTY'));
+  for (const n of PALETTES) {
+    assert.ok(new RegExp(`^\\s*${n}:`, 'm').test(block), `effects.js PALETTES has no ${n}`);
+  }
+});
+
+test('the tool-to-effect map only names real effects and palettes', () => {
+  // These fire from app events rather than from the model, so no amount of
+  // prompt-checking covers them; a typo here is a tool that paints nothing.
+  const src = read('src/renderer.js');
+  const block = src.slice(src.indexOf('const TOOL_FX = {'), src.indexOf('const DEFAULT_TOOL_FX'));
+  const pairs = [...block.matchAll(/\['([a-z]+)',\s*'([a-z]+)'\]/g)];
+  assert.ok(pairs.length >= 10, 'expected a populated TOOL_FX map');
+  for (const [, fx, pal] of pairs) {
+    assert.ok(POINT_EFFECTS.has(fx), `TOOL_FX names unknown effect ${fx}`);
+    assert.ok(PALETTES.has(pal), `TOOL_FX names unknown palette ${pal}`);
+  }
+});
+
 test('the system prompt teaches exactly the vocabulary the parser accepts', () => {
   const taught = new Set([...FLOURISH_SYSTEM_PROMPT.matchAll(/\{\{fx:([a-z]+)/g)].map((m) => m[1]));
   for (const n of [...POINT_EFFECTS, ...STYLE_SPANS]) {
@@ -178,7 +263,7 @@ test('the system prompt teaches exactly the vocabulary the parser accepts', () =
   }
 });
 
-test('the vocabulary is the full 22 effects', () => {
-  assert.strictEqual(POINT_EFFECTS.size, 13);
-  assert.strictEqual(STYLE_SPANS.size, 9);
+test('the vocabulary is the full 40 effects', () => {
+  assert.strictEqual(POINT_EFFECTS.size, 24);
+  assert.strictEqual(STYLE_SPANS.size, 16);
 });

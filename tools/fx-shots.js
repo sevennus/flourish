@@ -29,13 +29,25 @@ const POINT = [
   ['meteor', 620], ['confetti', 1200], ['fireworks', 480], ['vortex', 520],
   ['lightning', 140], ['nova', 260], ['matrix', 700], ['glitch', 150],
   ['shake', 140],
+  // Slower ones need longer to become themselves: frost has to creep, the
+  // constellation has to find its links, aurora has to fade up.
+  ['aurora', 1500], ['constellation', 900], ['shatter', 420], ['swarm', 1100],
+  ['sonar', 700], ['warp', 480], ['frost', 1500], ['bloom', 1000],
+  ['rain', 900], ['beam', 700], ['implode', 620],
 ];
 
 const SPANS = '{{fx:glow}}glow{{/fx:glow}} {{fx:shimmer}}shimmer{{/fx:shimmer}} '
   + '{{fx:rainbow}}rainbow{{/fx:rainbow}} {{fx:fire}}fire{{/fx:fire}} '
   + '{{fx:neon}}neon{{/fx:neon}} {{fx:wave}}wave{{/fx:wave}} '
   + '{{fx:bounce}}bounce{{/fx:bounce}} {{fx:scramble}}scramble{{/fx:scramble}} '
-  + '{{fx:color #ff5cad}}color{{/fx:color}}';
+  + '{{fx:color #ff5cad}}color{{/fx:color}}\n'
+  + '{{fx:chrome}}chrome{{/fx:chrome}} {{fx:sparkle}}sparkle{{/fx:sparkle}} '
+  + '{{fx:flicker}}flicker{{/fx:flicker}} {{fx:corrupt}}corrupt{{/fx:corrupt}} '
+  + '{{fx:ghost}}ghost{{/fx:ghost}} {{fx:stamp}}stamp{{/fx:stamp}} '
+  + '{{fx:redact}}redact{{/fx:redact}}';
+
+// One frame per palette, so a recolour that silently does nothing is visible.
+const PALETTE_SHOTS = ['mint', 'ice', 'gold', 'ember', 'violet', 'rose', 'mono'];
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -70,10 +82,13 @@ async function run() {
        '<div class="line system"><div class="body">✦ effect under test</div></div>'; true;`);
 
   // Hard-reset the engine rather than waiting for effects to time out — long
-  // ones (confetti falls for ~3s) would otherwise bleed into the next frame.
+  // ones (confetti falls for ~3s, swarm drifts for ~3.4s) would otherwise bleed
+  // into the next frame. Every array the engine animates has to be cleared here;
+  // miss one and that effect quietly stacks up across every later shot.
   const reset = () => win.webContents.executeJavaScript(
     `window.__fx.particles = []; window.__fx.rings = []; window.__fx.bolts = [];
-     window.__fx.matrix = null; true;`);
+     window.__fx.sheets = []; window.__fx.sweeps = [];
+     window.__fx.links = null; window.__fx.frost = null; window.__fx.matrix = null; true;`);
 
   console.log('point effects:');
   for (const [name, delay] of POINT) {
@@ -83,6 +98,18 @@ async function run() {
     await wait(delay);
     await shoot(win, name);
     await wait(200);
+  }
+  await reset();
+
+  console.log('palettes (spark):');
+  for (const pal of PALETTE_SHOTS) {
+    await reset();
+    await wait(160);
+    await win.webContents.executeJavaScript(
+      `window.__fx.fire('spark', 560, 330, { palette: '${pal}', scale: 1.7 }); true;`);
+    await wait(300);
+    await shoot(win, 'palette-' + pal);
+    await wait(160);
   }
   await reset();
 
@@ -135,13 +162,14 @@ async function run() {
       return inp.value.length;
     })();`);
 
-  for (const [label, keys] of [['typing-cool', 3], ['typing-warm', 5], ['typing-hot', 5], ['typing-blaze', 6]]) {
+  for (const [label, keys] of [['typing-cool', 3], ['typing-warm', 4], ['typing-hot', 4],
+                               ['typing-blaze', 4], ['typing-inferno', 5]]) {
     await type(keys);
     await wait(90);
     await shoot(win, label);
   }
 
-  console.log('\nwrote', POINT.length + 5, 'frames to assets/fx/');
+  console.log('\nwrote', POINT.length + PALETTE_SHOTS.length + 6, 'frames to assets/fx/');
   app.quit();
 }
 

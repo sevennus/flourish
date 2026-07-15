@@ -13,13 +13,23 @@
  *   Point effects (fire once, at the current caret):
  *     {{fx:spark}} {{fx:confetti}} {{fx:fireworks}} {{fx:ripple}}
  *     {{fx:pulse}} {{fx:shake}} {{fx:matrix}} {{fx:lightning}} {{fx:nova}}
- *     {{fx:meteor}} {{fx:embers}} {{fx:vortex}} {{fx:glitch}}
+ *     {{fx:meteor}} {{fx:embers}} {{fx:vortex}} {{fx:glitch}} {{fx:aurora}}
+ *     {{fx:constellation}} {{fx:shatter}} {{fx:swarm}} {{fx:sonar}}
+ *     {{fx:warp}} {{fx:frost}} {{fx:bloom}} {{fx:rain}} {{fx:beam}}
+ *     {{fx:implode}}
+ *
+ *   Point effects take optional args — a palette and/or a size:
+ *     {{fx:spark gold}}  {{fx:nova sm}}  {{fx:swarm violet lg}}
  *
  *   Text spans (style the wrapped characters):
  *     {{fx:shimmer}}...{{/fx:shimmer}}   {{fx:rainbow}}...{{/fx:rainbow}}
  *     {{fx:glow}}...{{/fx:glow}}         {{fx:wave}}...{{/fx:wave}}
  *     {{fx:fire}}...{{/fx:fire}}         {{fx:neon}}...{{/fx:neon}}
  *     {{fx:scramble}}...{{/fx:scramble}} {{fx:bounce}}...{{/fx:bounce}}
+ *     {{fx:flicker}}...{{/fx:flicker}}   {{fx:redact}}...{{/fx:redact}}
+ *     {{fx:stamp}}...{{/fx:stamp}}       {{fx:chrome}}...{{/fx:chrome}}
+ *     {{fx:ghost}}...{{/fx:ghost}}       {{fx:corrupt}}...{{/fx:corrupt}}
+ *     {{fx:sparkle}}...{{/fx:sparkle}}
  *     {{fx:color #ff0066}}...{{/fx:color}}
  *
  * Emitted events:
@@ -39,16 +49,43 @@
   const POINT_EFFECTS = new Set([
     'spark', 'confetti', 'fireworks', 'ripple', 'pulse', 'shake', 'matrix',
     'lightning', 'nova', 'meteor', 'embers', 'vortex', 'glitch',
+    'aurora', 'constellation', 'shatter', 'swarm', 'sonar', 'warp',
+    'frost', 'bloom', 'rain', 'beam', 'implode',
   ]);
   const STYLE_SPANS = new Set([
     'shimmer', 'rainbow', 'glow', 'wave', 'color',
     'fire', 'neon', 'scramble', 'bounce',
+    'flicker', 'redact', 'stamp', 'chrome', 'ghost', 'corrupt', 'sparkle',
   ]);
 
   // Spans rendered one <i> per character (staggered animation or per-char JS)
   // rather than as a single styled span. The renderer needs this; it lives here
   // so the vocabulary stays in one place.
-  const PER_CHAR_SPANS = new Set(['wave', 'bounce', 'scramble']);
+  const PER_CHAR_SPANS = new Set([
+    'wave', 'bounce', 'scramble', 'stamp', 'corrupt', 'sparkle',
+  ]);
+
+  // Point-effect args. A directive may carry a palette name and/or a size, in
+  // any order: `{{fx:spark gold}}`, `{{fx:nova sm}}`, `{{fx:swarm violet lg}}`.
+  // Parsed here (rather than in the engine) so the vocabulary — including what
+  // counts as a valid argument — stays in one place.
+  const PALETTES = new Set(['mint', 'ice', 'gold', 'ember', 'violet', 'rose', 'mono']);
+  const SIZES = { sm: 0.55, md: 1, lg: 1.7, xl: 2.6 };
+
+  /**
+   * Parse a raw point-effect args string into { palette, scale }.
+   * Unknown words are ignored, so a typo degrades to the default rather than
+   * killing the effect.
+   */
+  function parseArgs(raw) {
+    const out = { palette: null, scale: 1 };
+    for (const w of String(raw || '').toLowerCase().split(/\s+/)) {
+      if (!w) continue;
+      if (PALETTES.has(w)) out.palette = w;
+      else if (SIZES[w] != null) out.scale = SIZES[w];
+    }
+    return out;
+  }
 
   // A directive can't be longer than this; if we buffer `{{` and never find a
   // closing `}}` within this many chars, we give up and flush it as literal
@@ -162,5 +199,8 @@
     }
   }
 
-  return { FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS };
+  return {
+    FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS,
+    PALETTES, SIZES, parseArgs,
+  };
 });

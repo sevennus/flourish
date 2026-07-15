@@ -12,15 +12,25 @@
 const SHOWCASE =
   "Welcome to {{fx:neon}}Flourish{{/fx:neon}} — a terminal that {{fx:rainbow}}paints as it speaks{{/fx:rainbow}}. {{fx:spark}}\n\n" +
   "The quiet ones: a word can {{fx:shimmer}}shimmer{{/fx:shimmer}}, {{fx:glow}}glow{{/fx:glow}}, run {{fx:fire}}hot{{/fx:fire}}, " +
-  "{{fx:wave}}roll{{/fx:wave}}, {{fx:bounce}}bounce{{/fx:bounce}}, {{fx:scramble}}decode into place{{/fx:scramble}}, " +
-  "or land in {{fx:color #ff5cad}}hot pink{{/fx:color}}. {{fx:ripple}}\n\n" +
-  "The loud ones: {{fx:confetti}}confetti on a win, {{fx:fireworks}}fireworks for the reveal, " +
-  "{{fx:embers}}embers as the work warms up, {{fx:meteor}}meteors on a wide sweep, " +
-  "{{fx:vortex}}a vortex converging on an answer, {{fx:lightning}}lightning for a hard truth, " +
-  "{{fx:matrix}}glyphs when we go into the code, and {{fx:glitch}}a channel tear when it all breaks. {{fx:shake}}\n\n" +
+  "go {{fx:chrome}}machined{{/fx:chrome}}, {{fx:sparkle}}sparkle{{/fx:sparkle}}, {{fx:flicker}}flicker{{/fx:flicker}}, " +
+  "{{fx:corrupt}}rot{{/fx:corrupt}}, fade to a {{fx:ghost}}ghost{{/fx:ghost}}, {{fx:wave}}roll{{/fx:wave}}, " +
+  "{{fx:bounce}}bounce{{/fx:bounce}}, {{fx:stamp}}land hard{{/fx:stamp}}, {{fx:scramble}}decode into place{{/fx:scramble}}, " +
+  "hide behind {{fx:redact}}a black bar{{/fx:redact}}, or land in {{fx:color #ff5cad}}hot pink{{/fx:color}}. {{fx:ripple}}\n\n" +
+  "The working ones: {{fx:beam}}a beam sweeps while I read, {{fx:sonar}}sonar while I probe, " +
+  "{{fx:matrix}}glyphs when we go into the code, {{fx:meteor}}meteors on a wide sweep, " +
+  "{{fx:swarm violet}}a swarm when a dozen things run at once, {{fx:constellation}}a constellation as the pieces connect, " +
+  "and {{fx:implode}}an implosion as it all narrows to one answer. {{fx:vortex}}\n\n" +
+  "The moods: {{fx:aurora}}an aurora for the lull, {{fx:rain ice}}rain for the long grind, " +
+  "{{fx:bloom rose}}a bloom as something opens up, {{fx:frost}}frost when it all goes cold, " +
+  "and {{fx:warp violet}}warp when we jump. {{fx:embers}}\n\n" +
+  "The loud ones: {{fx:confetti}}confetti on a win, {{fx:fireworks gold}}fireworks for the reveal, " +
+  "{{fx:lightning}}lightning for a hard truth, {{fx:shatter}}shattering glass when it breaks badly, " +
+  "and {{fx:glitch}}a channel tear when it all goes wrong. {{fx:shake}}\n\n" +
   "And when it really lands — {{fx:nova}}{{fx:glow}}a nova{{/fx:glow}}. {{fx:pulse}}\n\n" +
   "Every one of those was written into my reply by the {{fx:wave}}flourish protocol{{/fx:wave}} — " +
-  "the same channel real Claude Code uses over SSH. Now type something and watch the prompt box itself. {{fx:spark}}";
+  "the same channel real Claude Code uses over SSH. The terminal adds its own on top: `inline code`, " +
+  "**bold**, and numbers like 16000 highlight themselves, and every tool call paints its own shape. " +
+  "Now type something and watch the prompt box itself. {{fx:spark gold}}";
 
 const RESPONSES = [
   {

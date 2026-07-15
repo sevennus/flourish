@@ -108,10 +108,19 @@ body {
   transition: background 0.4s ease;
 }
 #input-row > * { position: relative; z-index: 1; }
+#input-row[data-heat="warm"] { border-top-color: #2b5544; }
+#input-row[data-heat="warm"]::before { background: linear-gradient(0deg, rgba(55,182,255,0.18), transparent 72%); }
 #input-row[data-heat="hot"] { border-top-color: #6b4526; }
 #input-row[data-heat="hot"]::before { background: linear-gradient(0deg, rgba(255,157,60,0.24), transparent 72%); }
 #input-row[data-heat="blaze"] { border-top-color: #7d3320; }
 #input-row[data-heat="blaze"]::before { background: linear-gradient(0deg, rgba(255,92,42,0.34), transparent 78%); }
+/* Top tier: the row itself starts to breathe. */
+#input-row[data-heat="inferno"] { border-top-color: #a32d1c; }
+#input-row[data-heat="inferno"]::before {
+  background: linear-gradient(0deg, rgba(255,56,96,0.44), rgba(255,157,60,0.16) 40%, transparent 84%);
+  animation: infernopulse 0.85s ease-in-out infinite;
+}
+@keyframes infernopulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.45); } }
 
 .prompt-sigil {
   color: var(--accent); text-shadow: 0 0 8px var(--accent);
@@ -119,8 +128,24 @@ body {
   transform: scale(calc(1 + var(--heat, 0) * 0.3));
   transition: color 0.3s ease, text-shadow 0.3s ease;
 }
+#input-row[data-heat="warm"] .prompt-sigil { color: #7effc4; text-shadow: 0 0 10px #7effc4; }
 #input-row[data-heat="hot"] .prompt-sigil { color: #ff9d3c; text-shadow: 0 0 12px #ff9d3c; }
 #input-row[data-heat="blaze"] .prompt-sigil { color: #ff5c2a; text-shadow: 0 0 18px #ff5c2a, 0 0 32px #ff3860; }
+#input-row[data-heat="inferno"] .prompt-sigil {
+  color: #fff3b0; text-shadow: 0 0 10px #fff3b0, 0 0 22px #ff5c2a, 0 0 40px #ff3860;
+  animation: sigilspin 1.6s linear infinite;
+}
+@keyframes sigilspin {
+  0%, 100% { transform: scale(calc(1 + var(--heat, 0) * 0.3)) rotate(0deg); }
+  50% { transform: scale(calc(1 + var(--heat, 0) * 0.42)) rotate(8deg); }
+}
+
+/* The prompt box breathes gently while a written-but-unsent message waits. */
+#input-row.pondering .prompt-sigil { animation: ponder 2.4s ease-in-out infinite; }
+@keyframes ponder {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 #input {
   flex: 1; background: transparent; border: none; outline: none;
   color: var(--fg); font-family: var(--mono); font-size: 15px;
@@ -201,6 +226,129 @@ body {
   transition: color 0.4s ease, text-shadow 0.4s ease;
 }
 .fx-scramble > i.settled { color: inherit; text-shadow: none; }
+
+/* A dying fluorescent tube — irregular on purpose. Unlike .fx-neon (which is
+   healthy and just blinks now and then), this never quite settles. */
+.fx-flicker { color: #eafff4; animation: flicker 2.6s linear infinite; }
+@keyframes flicker {
+  0%, 100% { opacity: 1; text-shadow: 0 0 7px var(--accent); }
+  6% { opacity: 0.35; text-shadow: none; }
+  8% { opacity: 1; text-shadow: 0 0 7px var(--accent); }
+  9% { opacity: 0.2; text-shadow: none; }
+  11% { opacity: 1; }
+  33% { opacity: 0.9; }
+  34% { opacity: 0.25; text-shadow: none; }
+  36% { opacity: 1; text-shadow: 0 0 10px var(--accent); }
+  62% { opacity: 1; }
+  63% { opacity: 0.4; text-shadow: none; }
+  65% { opacity: 1; text-shadow: 0 0 7px var(--accent); }
+  77% { opacity: 0.55; }
+  79% { opacity: 1; }
+}
+
+/* Redacted: a solid bar that slides away to reveal what's under it. The bar is
+   a pseudo-element so the text underneath stays selectable and copyable. */
+.fx-redact { position: relative; color: inherit; }
+.fx-redact::after {
+  content: ""; position: absolute; inset: -1px -2px;
+  background: linear-gradient(90deg, #101820, #1b2a35);
+  border-radius: 2px;
+  animation: redact 1.5s cubic-bezier(.7,0,.2,1) forwards;
+  transform-origin: right center;
+  pointer-events: none;
+}
+@keyframes redact {
+  0%, 55% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(0); opacity: 1; }
+}
+
+/* Each character slams down into place, oversized and blurred, and lands hard.
+   Staggered per character by renderer.js. */
+.fx-stamp { display: inline-block; }
+.fx-stamp > i {
+  display: inline-block; font-style: normal; font-weight: 700;
+  animation: stamp 0.42s cubic-bezier(.2,1.6,.4,1) both;
+}
+@keyframes stamp {
+  0% { transform: scale(2.6); opacity: 0; filter: blur(4px); }
+  60% { opacity: 1; filter: blur(0); }
+  100% { transform: scale(1); opacity: 1; filter: blur(0); }
+}
+
+/* Brushed metal: a hard specular band travelling across the glyphs. */
+.fx-chrome {
+  background: linear-gradient(100deg, #6c7a86 0%, #c8d6e0 18%, #ffffff 26%,
+                              #93a4b0 34%, #5d6b76 52%, #b9c9d6 74%, #ffffff 82%, #6c7a86 100%);
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: chrome 3.4s linear infinite;
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,0.5));
+}
+@keyframes chrome { to { background-position: 300% 0; } }
+
+/* Barely there — an aside, a maybe. Drifts and breathes. */
+.fx-ghost {
+  color: #8fb3a3; opacity: 0.62;
+  animation: ghostdrift 4.5s ease-in-out infinite;
+  text-shadow: 0 0 12px rgba(143,179,163,0.4);
+}
+@keyframes ghostdrift {
+  0%, 100% { opacity: 0.62; transform: translateY(0); }
+  50% { opacity: 0.3; transform: translateY(-0.12em); }
+}
+
+/* Data rot: per-character RGB tear that jumps rather than slides. Same
+   steps(1,end) trick as #app.glitch — interpolating the offsets averages them
+   away to nothing, and it's the hard jump that reads as corruption. */
+.fx-corrupt { display: inline-block; }
+.fx-corrupt > i {
+  display: inline-block; font-style: normal; color: #cfe9d8;
+  animation: corrupt 1.7s linear infinite;
+}
+@keyframes corrupt {
+  0% { transform: translate(0); text-shadow: none; animation-timing-function: steps(1, end); }
+  12% { transform: translate(-2px, 1px); text-shadow: 2px 0 #ff2d6f, -2px 0 #2dd6ff; animation-timing-function: steps(1, end); }
+  24% { transform: translate(2px, -1px); text-shadow: -2px 0 #ff2d6f, 2px 0 #2dd6ff; animation-timing-function: steps(1, end); }
+  36% { transform: translate(0); text-shadow: none; animation-timing-function: steps(1, end); }
+  70% { transform: translate(0); text-shadow: none; animation-timing-function: steps(1, end); }
+  76% { transform: translate(1px, 1px); text-shadow: -3px 0 #ff2d6f, 1px 0 #2dd6ff; animation-timing-function: steps(1, end); }
+  82% { transform: translate(0); text-shadow: none; }
+}
+
+/* Twinkling motes riding on top of the glyphs. The star is a pseudo-element so
+   it can't disturb the text metrics. */
+.fx-sparkle { display: inline-block; }
+.fx-sparkle > i {
+  display: inline-block; font-style: normal; position: relative;
+  color: #fff6d8; text-shadow: 0 0 8px #ffd27a;
+}
+.fx-sparkle > i::after {
+  content: "✦"; position: absolute; top: -0.5em; right: -0.18em;
+  font-size: 0.5em; color: #fff3b0; opacity: 0;
+  animation: sparkle 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes sparkle {
+  0%, 82%, 100% { opacity: 0; transform: scale(0.4) rotate(0deg); }
+  88% { opacity: 1; transform: scale(1.15) rotate(80deg); }
+  94% { opacity: 0; transform: scale(0.5) rotate(140deg); }
+}
+
+/* ---- automatic highlights ----
+   Applied by renderer.js to things the model never marked up — inline code,
+   **bold**, and bare numbers. Deliberately quieter than any {{fx:}} span: this
+   layer fires constantly, so it has to stay legible rather than loud, and it
+   must never break selection or copy. */
+.auto-code {
+  color: #9fe8ff;
+  background: rgba(55,182,255,0.09);
+  border: 1px solid rgba(55,182,255,0.16);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.auto-bold { color: #ffffff; font-weight: 700; text-shadow: 0 0 9px rgba(53,240,160,0.35); }
+.auto-num { color: var(--accent); text-shadow: 0 0 7px rgba(53,240,160,0.45); }
+.auto-path { color: #ffd27a; text-decoration: underline; text-decoration-color: rgba(255,210,122,0.3); }
 
 /* ---- full-screen effects ---- */
 #app.shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }

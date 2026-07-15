@@ -12,9 +12,27 @@
 (function () {
   'use strict';
 
-  const { FlourishParser, PER_CHAR_SPANS } = window.Flourish;
+  const { FlourishParser, PER_CHAR_SPANS, parseArgs } = window.Flourish;
+  const { AutoStyler } = window.AutoFX;
   const api = window.flourishAPI;
   const el = (id) => document.getElementById(id);
+
+  // Which effect a tool call paints. Every tool used to fire the same spark,
+  // which wasted the one signal the app gets for free — reading is not writing
+  // is not searching, and they shouldn't look alike. Kept small (`sm`) because
+  // these fire constantly and are punctuation, not announcements.
+  const TOOL_FX = {
+    Read: ['beam', 'ice'], NotebookRead: ['beam', 'ice'],
+    Glob: ['beam', 'mint'], Grep: ['beam', 'mint'], LS: ['beam', 'mint'],
+    Bash: ['matrix', 'mint'], BashOutput: ['matrix', 'mint'],
+    Edit: ['spark', 'gold'], MultiEdit: ['spark', 'gold'],
+    Write: ['spark', 'ember'], NotebookEdit: ['spark', 'gold'],
+    WebSearch: ['meteor', 'ice'], WebFetch: ['meteor', 'violet'],
+    Task: ['swarm', 'violet'], Agent: ['swarm', 'violet'], Workflow: ['swarm', 'violet'],
+    TodoWrite: ['ripple', 'mint'], TaskCreate: ['ripple', 'mint'], TaskUpdate: ['ripple', 'mint'],
+    Skill: ['bloom', 'rose'],
+  };
+  const DEFAULT_TOOL_FX = ['spark', 'mint'];
 
   const transcript = el('transcript');
   const screen = el('screen');
@@ -48,6 +66,7 @@
     return { x: r.left, y: r.top + r.height / 2 };
   }
 
+
   // ---------- assistant line lifecycle ----------
   function newAssistantBody(withLabel) {
     const body = addLine('assistant', withLabel ? 'claude' : null);
@@ -61,6 +80,7 @@
       id: reqId, body: seg.body, caret: seg.caret,
       parser: new FlourishParser(), reveal: '', queue: [],
       stack: [seg.body], streamDone: false, waveN: 0, tools: new Map(),
+      auto: new AutoStyler(), autoCls: null, autoNode: null,
     };
     ensureTyping();
   }
@@ -68,6 +88,7 @@
   function target() { return activeLine.stack[activeLine.stack.length - 1]; }
 
   function openStyle(name, args) {
+    flushAuto();   // the model's markup wins; land any buffered auto text first
     const span = document.createElement('span'); span.dataset.fx = name;
     if (name === 'color') { const h = (args || '').trim(); if (/^#[0-9a-fA-F]{3,8}$/.test(h)) span.style.color = h; }
     else span.className = 'fx-' + name;
@@ -101,14 +122,15 @@
     tick();
   }
 
-  function appendText(str) {
-    const tgt = target();
+  // Put a run of text into a node — one <i> per character if we're inside a
+  // per-char span, otherwise a single text node.
+  function appendInto(tgt, str) {
     const fx = perCharFx();
     if (!fx) { tgt.appendChild(document.createTextNode(str)); return; }
     for (const ch of str) {
       const i = document.createElement('i');
       i.textContent = ch;
-      if (fx === 'wave' || fx === 'bounce') {
+      if (fx === 'wave' || fx === 'bounce' || fx === 'stamp' || fx === 'corrupt' || fx === 'sparkle') {
         i.style.animationDelay = ((activeLine.waveN++ % 24) * 0.05).toFixed(2) + 's';
       } else if (fx === 'scramble') {
         scrambleIn(i, ch);
@@ -117,10 +139,55 @@
     }
   }
 
+  // An auto-highlight span stays open across feeds so a long `code` run is one
+  // bordered box, not one per typewriter chunk.
+  function openAuto(cls) {
+    const s = document.createElement('span'); s.className = cls;
+    target().appendChild(s);
+    activeLine.autoNode = s; activeLine.autoCls = cls;
+  }
+  function closeAuto() {
+    if (!activeLine) return;
+    activeLine.autoNode = null; activeLine.autoCls = null;
+  }
+  function emitRuns(runs) {
+    for (const r of runs) {
+      if (r.cls !== activeLine.autoCls) { closeAuto(); if (r.cls) openAuto(r.cls); }
+      appendInto(activeLine.autoNode || target(), r.text);
+    }
+  }
+  function flushAuto() {
+    if (!activeLine) return;
+    emitRuns(activeLine.auto.flush());
+    closeAuto();
+  }
+
+  // Tiny sparks off the model's own punctuation — free flourishes that cost the
+  // model nothing to author. Throttled, because otherwise an excited reply
+  // turns into a strobe.
+  let lastMicro = 0;
+  function microFx(str) {
+    if (str.indexOf('!') === -1 && str.indexOf('?') === -1) return;
+    const now = performance.now();
+    if (now - lastMicro < 450) return;
+    lastMicro = now;
+    const p = caretPos(target());
+    if (str.indexOf('?') !== -1) effects.fire('ripple', p.x, p.y, { scale: 0.55, palette: 'ice' });
+    else effects.fire('spark', p.x, p.y, { scale: 0.5, palette: 'gold' });
+  }
+
+  function appendText(str) {
+    microFx(str);
+    // Inside an explicit {{fx:}} span the model's markup wins outright — the
+    // auto layer would only fight it for colour.
+    if (activeLine.stack.length > 1) { closeAuto(); appendInto(target(), str); return; }
+    emitRuns(activeLine.auto.feed(str));
+  }
+
   function applyEvents(events) {
     for (const ev of events) {
       if (ev.t === 'text') appendText(ev.value);
-      else if (ev.t === 'effect') { const p = caretPos(target()); effects.fire(ev.name, p.x, p.y); }
+      else if (ev.t === 'effect') { const p = caretPos(target()); effects.fire(ev.name, p.x, p.y, parseArgs(ev.args)); }
       else if (ev.t === 'style-start') openStyle(ev.name, ev.args);
       else if (ev.t === 'style-end') closeStyle(ev.name);
     }
@@ -132,6 +199,7 @@
     const line = activeLine;
     if (item.phase === 'start') {
       applyEvents(line.parser.flush());              // close any dangling directive
+      flushAuto();                                   // land any buffered auto text
       while (line.stack.length > 1) line.stack.pop(); // close open style spans
       if (line.caret && line.caret.parentNode) line.caret.remove();
       const hadText = line.body.textContent.trim().length > 0;
@@ -139,22 +207,39 @@
       const toolBody = addLine('tool');
       toolBody.textContent = '⚙ ' + item.name;
       line.tools.set(item.name, toolBody);
-      const p = caretPos(toolBody); effects.fire('spark', p.x, p.y);
+      const p = caretPos(toolBody);
+      const [fx, pal] = TOOL_FX[item.name] || DEFAULT_TOOL_FX;
+      effects.fire(fx, p.x, p.y, { scale: 0.55, palette: pal });
 
       const seg = newAssistantBody(false);           // continue text below the tool line
       line.body = seg.body; line.caret = seg.caret; line.stack = [seg.body];
+      line.auto = new AutoStyler(); closeAuto();     // formatting doesn't cross a tool line
       if (!hadText) { /* first segment was empty; that's fine */ }
     } else { // end
       const t = line.tools.get(item.name);
-      if (t) { t.textContent = '✓ ' + item.name; t.classList.add('done'); line.tools.delete(item.name); }
+      if (t) {
+        t.textContent = '✓ ' + item.name; t.classList.add('done');
+        line.tools.delete(item.name);
+        // A tool finishing used to paint nothing at all. A small green puff off
+        // the line is the cheapest possible "that worked".
+        const p = caretPos(t);
+        effects.emit(p.x, p.y, {
+          n: 10, colors: ['#35f0a0', '#7effc4', '#ffffff'],
+          angle: -Math.PI / 2, spread: 1.1,
+          speedMin: 0.4, speedMax: 2.1, sizeMin: 0.8, sizeMax: 1.8,
+          lifeMin: 260, lifeMax: 620, grav: 0.02, jitter: 2, halo: 8,
+        });
+      }
     }
   }
 
   function finalizeAssistant() {
     if (!activeLine) return;
+    flushAuto();
     if (activeLine.caret && activeLine.caret.parentNode) activeLine.caret.remove();
     if (!activeLine.body.textContent.trim() && activeLine.body.parentNode) activeLine.body.parentNode.remove();
     activeLine = null; setBusy(false); scrollToEnd();
+    idle.kick();
   }
 
   // ---------- typewriter over the unified queue ----------
@@ -192,6 +277,27 @@
     requestAnimationFrame(step);
   }
 
+  // ---------- ambient ----------
+  // Sitting idle, the screen is dead still. After a long enough pause, paint
+  // something slow and quiet — never a burst, never while the model is talking,
+  // and never while the window is hidden (a background window throttles rAF, so
+  // the particles would just pile up unrendered and all play at once on return).
+  const idle = (function () {
+    const AMBIENT = [
+      ['aurora', 'mint'], ['aurora', 'violet'], ['aurora', 'ice'],
+      ['swarm', 'gold'], ['constellation', 'ice'], ['rain', 'ice'],
+    ];
+    let timer = null;
+    const schedule = (ms) => { clearTimeout(timer); timer = setTimeout(go, ms); };
+    function go() {
+      if (activeLine || document.hidden) { schedule(30000); return; }
+      const [fx, pal] = AMBIENT[(Math.random() * AMBIENT.length) | 0];
+      effects.fire(fx, window.innerWidth / 2, window.innerHeight * 0.4, { scale: 0.8, palette: pal });
+      schedule(50000 + Math.random() * 40000);
+    }
+    return { kick: () => schedule(45000 + Math.random() * 30000) };
+  })();
+
   // ---------- send / receive ----------
   function setBusy(b) { input.disabled = b; sendBtn.disabled = b; if (!b) input.focus(); }
 
@@ -202,7 +308,10 @@
     const reqId = 'r' + (++reqCounter);
     setBusy(true); startAssistant(reqId);
     api.send({ requestId: reqId, text: t });
+    idle.kick();
   }
+
+  input.addEventListener('input', () => idle.kick());
 
   inputRow.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -225,12 +334,16 @@
   api.onError((d) => {
     if (activeLine && d.requestId === activeLine.id) {
       applyEvents(activeLine.parser.flush());
+      flushAuto();
       if (activeLine.caret && activeLine.caret.parentNode) activeLine.caret.remove();
       if (!activeLine.body.textContent.trim() && activeLine.body.parentNode) activeLine.body.parentNode.remove();
       activeLine = null; setBusy(false);
     }
     plainLine('error', '⚠ ' + (d.message || 'Something went wrong.'));
+    // A failure earns more than a shake: tear the channels too.
+    effects.fire('glitch');
     effects.fire('shake');
+    idle.kick();
   });
 
   api.onAuto((d) => { plainLine('user', d.userText || ''); setBusy(true); startAssistant(d.requestId); });
@@ -246,7 +359,21 @@
     else if (state === 'closed') { dot.className = 'dot'; text.textContent = 'disconnected · ' + target; }
     else { dot.className = 'dot'; text.textContent = target; } // idle
   }
-  api.onStatus((s) => setStatus(s.state, s.target || s.message));
+  // The connection itself is worth painting — it's the one thing on screen the
+  // model can't narrate, because when it matters the model isn't reachable.
+  let lastState = null;
+  api.onStatus((s) => {
+    setStatus(s.state, s.target || s.message);
+    if (s.state === lastState) return;
+    const dot = el('status-dot');
+    const r = dot ? dot.getBoundingClientRect() : null;
+    const x = r ? r.left + r.width / 2 : undefined;
+    const y = r ? r.top + r.height / 2 : undefined;
+    if (s.state === 'connected') effects.fire('ripple', x, y, { palette: 'mint' });
+    else if (s.state === 'error') effects.fire('glitch');
+    else if (s.state === 'closed' && lastState === 'connected') effects.fire('frost', x, y, { scale: 0.7, palette: 'ice' });
+    lastState = s.state;
+  });
 
   // ---------- settings ----------
   const overlay = el('settings-overlay');
@@ -313,5 +440,6 @@
         : 'Type a message to run it through Claude Code on ' + cfg.host + '.')
       : 'Open settings (⚙) to point it at Claude Code on your VM, or turn on Demo mode.'));
     input.focus();
+    idle.kick();
   })();
 })();
