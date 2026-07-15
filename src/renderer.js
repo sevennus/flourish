@@ -58,7 +58,13 @@
     return body;
   }
   function plainLine(cls, text) { addLine(cls).textContent = text; scrollToEnd(); }
-  function scrollToEnd() { screen.scrollTop = screen.scrollHeight; }
+
+  // The transcript is followed by a critically damped spring rather than pinned
+  // with `scrollTop = scrollHeight`. The target moves while we chase it (text is
+  // still arriving), so this is a "follow", not a "scroll to" — see scroller.js.
+  // Call sites are unchanged: scrollToEnd() just means "content grew" now.
+  const follower = window.Scroller.follower(screen);
+  function scrollToEnd() { follower.follow(); }
 
   function caretPos(t) {
     const m = document.createElement('span'); m.textContent = '​'; t.appendChild(m);
@@ -153,11 +159,80 @@
   // the span closes, and a CSS animation would fight it.
   const CSS_STAGGERED = new Set(['wave', 'bounce', 'stamp', 'corrupt', 'sparkle']);
 
+  // ---------- soft character reveal ----------
+  // Characters ease up into place instead of popping. Three constraints shape
+  // this:
+  //
+  //  1. Copy/paste. A permanent <i> per character would wreck it (the same
+  //     reason the model is told not to wrap code/numbers in spans), so a char
+  //     flattens back into the preceding text node the moment its animation
+  //     ends. A settled paragraph is one text node again, exactly as before —
+  //     only the ~16 chars still in flight are elements.
+  //  2. Perception. Past ~3 chars/frame you can't see an individual character
+  //     arrive, so there's nothing to animate; this is why it keys off the
+  //     typewriter's adaptive rate rather than running always. Falling behind
+  //     turns it off by itself.
+  //  3. Layout. The <i> is inline-block and only *transformed*, so it occupies
+  //     its final box from birth — the line never reflows mid-animation.
+  //
+  // Whitespace is passed through as plain text: a newline inside an inline-block
+  // would break *inside* the box under `white-space: pre-wrap`, and animating a
+  // space is invisible work.
+  const SOFT_MAX_N = 3;
+  const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  let softReveal = false;
+
+  // Append text, merging into the trailing text node so a run stays one node.
+  function appendText(tgt, s) {
+    const last = tgt.lastChild;
+    if (last && last.nodeType === 3) last.appendData(s);
+    else tgt.appendChild(document.createTextNode(s));
+  }
+
+  // Animation done — dissolve the element back into the text before it. Chars
+  // settle in the order they were born, so each one finds the merged text node
+  // its predecessor left behind and the run collapses to a single node.
+  function onCharSettled(e) {
+    const i = e.currentTarget;
+    if (!i.parentNode) return;
+    const prev = i.previousSibling;
+    const txt = i.textContent;
+    if (prev && prev.nodeType === 3) { prev.appendData(txt); i.remove(); }
+    else i.replaceWith(document.createTextNode(txt));
+  }
+
+  function softInto(tgt, str) {
+    for (const ch of str) {
+      if (ch === '\n' || ch === ' ' || ch === '\t') { appendText(tgt, ch); continue; }
+      const i = document.createElement('i');
+      i.className = 'ch';
+      i.textContent = ch;
+      i.addEventListener('animationend', onCharSettled, { once: true });
+      tgt.appendChild(i);
+    }
+  }
+
+  // A char is born at opacity 0 and only becomes visible by animating, so a
+  // stalled compositor would strand it: invisible text, permanently, with no
+  // animationend to flatten it. Hiding the window is the way to stall one. Don't
+  // gamble that it resumes cleanly — settle everything in flight on the way out.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) return;
+    for (const i of transcript.querySelectorAll('i.ch')) {
+      i.removeEventListener('animationend', onCharSettled);
+      onCharSettled({ currentTarget: i });
+    }
+  });
+
   // Put a run of text into a node — one <i> per character if we're inside a
   // per-char span, otherwise a single text node.
   function appendInto(tgt, str) {
     const fx = perCharFx();
-    if (!fx) { tgt.appendChild(document.createTextNode(str)); return; }
+    if (!fx) {
+      if (softReveal && !reduceMotion) softInto(tgt, str);
+      else appendText(tgt, str);
+      return;
+    }
     for (const ch of str) {
       const i = document.createElement('i');
       i.textContent = ch;
@@ -295,6 +370,9 @@
       if (line.reveal.length) {
         // Leisurely when caught up, faster the further behind we are.
         const n = Math.min(14, 1 + Math.floor(line.reveal.length / 90));
+        // Only ease characters in while they're arriving slowly enough to see
+        // one land. This rate already tracks exactly that, so reuse it.
+        softReveal = n <= SOFT_MAX_N;
         const chunk = line.reveal.slice(0, n); line.reveal = line.reveal.slice(n);
         applyEvents(line.parser.feed(chunk));
       } else if (line.queue.length) {
