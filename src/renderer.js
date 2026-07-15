@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const { FlourishParser, PER_CHAR_SPANS, parseArgs } = window.Flourish;
+  const { FlourishParser, PER_CHAR_SPANS, CONSUMING_SPANS, parseArgs } = window.Flourish;
   const { AutoStyler } = window.AutoFX;
   const api = window.flourishAPI;
   const el = (id) => document.getElementById(id);
@@ -41,6 +41,7 @@
   const inputRow = el('input-row');
   const effects = new window.FlourishEffects(el('fx-canvas'));
   const inputFX = new window.FlourishInputFX(input, effects, inputRow);
+  const textFX = new window.FlourishTextFX(effects);
 
   let activeLine = null;
   let reqCounter = 0;
@@ -92,10 +93,21 @@
     const span = document.createElement('span'); span.dataset.fx = name;
     if (name === 'color') { const h = (args || '').trim(); if (/^#[0-9a-fA-F]{3,8}$/.test(h)) span.style.color = h; }
     else span.className = 'fx-' + name;
+    if (args) span.dataset.fxArgs = args;
     target().appendChild(span); activeLine.stack.push(span);
   }
   function closeStyle(name) {
-    while (activeLine.stack.length > 1) { const top = activeLine.stack.pop(); if (top.dataset && top.dataset.fx === name) break; }
+    while (activeLine.stack.length > 1) {
+      const top = activeLine.stack.pop();
+      if (top.dataset && top.dataset.fx === name) {
+        // A consuming span can only run once all its characters exist, which is
+        // exactly now: the closing directive has arrived, so the span is
+        // complete. (Igniting as characters streamed in would set fire to a
+        // word that hadn't finished being typed.)
+        if (CONSUMING_SPANS.has(name)) textFX.play(name, top, top.dataset.fxArgs || '');
+        break;
+      }
+    }
   }
   // Some spans animate per character, so text inside them is split into <i>
   // elements instead of one text node. The innermost such span wins.
@@ -109,6 +121,7 @@
   }
 
   const SCRAMBLE_GLYPHS = '!<>-_\\/[]{}=+*^?#%&@$0123456789';
+  const HEX_GLYPHS = '0123456789abcdef';
 
   // Decode-in: flicker a character through junk glyphs before it settles.
   function scrambleIn(node, ch) {
@@ -122,6 +135,24 @@
     tick();
   }
 
+  // Like scramble, but the junk is hex — it reads as looking at the bytes
+  // underneath the text rather than at a cipher.
+  function hexIn(node, ch) {
+    if (!ch.trim()) return;
+    let left = 3 + ((Math.random() * 7) | 0);
+    const tick = () => {
+      if (left-- <= 0) { node.textContent = ch; node.classList.add('settled'); return; }
+      node.textContent = HEX_GLYPHS[(Math.random() * 16) | 0];
+      setTimeout(tick, 38);
+    };
+    tick();
+  }
+
+  // Spans whose per-character animation is pure CSS and just needs staggering.
+  // burn and cascade are absent on purpose: textfx.js drives those from JS once
+  // the span closes, and a CSS animation would fight it.
+  const CSS_STAGGERED = new Set(['wave', 'bounce', 'stamp', 'corrupt', 'sparkle']);
+
   // Put a run of text into a node — one <i> per character if we're inside a
   // per-char span, otherwise a single text node.
   function appendInto(tgt, str) {
@@ -130,10 +161,12 @@
     for (const ch of str) {
       const i = document.createElement('i');
       i.textContent = ch;
-      if (fx === 'wave' || fx === 'bounce' || fx === 'stamp' || fx === 'corrupt' || fx === 'sparkle') {
+      if (CSS_STAGGERED.has(fx)) {
         i.style.animationDelay = ((activeLine.waveN++ % 24) * 0.05).toFixed(2) + 's';
       } else if (fx === 'scramble') {
         scrambleIn(i, ch);
+      } else if (fx === 'hexdump') {
+        hexIn(i, ch);
       }
       tgt.appendChild(i);
     }

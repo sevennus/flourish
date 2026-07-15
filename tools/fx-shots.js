@@ -34,6 +34,8 @@ const POINT = [
   ['aurora', 1500], ['constellation', 900], ['shatter', 420], ['swarm', 1100],
   ['sonar', 700], ['warp', 480], ['frost', 1500], ['bloom', 1000],
   ['rain', 900], ['beam', 700], ['implode', 620],
+  ['scanlines', 900], ['static', 300], ['vhs', 200], ['grid', 1200],
+  ['circuit', 1400], ['tracer', 1400],
 ];
 
 const SPANS = '{{fx:glow}}glow{{/fx:glow}} {{fx:shimmer}}shimmer{{/fx:shimmer}} '
@@ -44,7 +46,8 @@ const SPANS = '{{fx:glow}}glow{{/fx:glow}} {{fx:shimmer}}shimmer{{/fx:shimmer}} 
   + '{{fx:chrome}}chrome{{/fx:chrome}} {{fx:sparkle}}sparkle{{/fx:sparkle}} '
   + '{{fx:flicker}}flicker{{/fx:flicker}} {{fx:corrupt}}corrupt{{/fx:corrupt}} '
   + '{{fx:ghost}}ghost{{/fx:ghost}} {{fx:stamp}}stamp{{/fx:stamp}} '
-  + '{{fx:redact}}redact{{/fx:redact}}';
+  + '{{fx:redact}}redact{{/fx:redact}} {{fx:hologram}}hologram{{/fx:hologram}} '
+  + '{{fx:hexdump}}hexdump{{/fx:hexdump}}';
 
 // One frame per palette, so a recolour that silently does nothing is visible.
 const PALETTE_SHOTS = ['mint', 'ice', 'gold', 'ember', 'violet', 'rose', 'mono'];
@@ -85,10 +88,23 @@ async function run() {
   // ones (confetti falls for ~3s, swarm drifts for ~3.4s) would otherwise bleed
   // into the next frame. Every array the engine animates has to be cleared here;
   // miss one and that effect quietly stacks up across every later shot.
-  const reset = () => win.webContents.executeJavaScript(
-    `window.__fx.particles = []; window.__fx.rings = []; window.__fx.bolts = [];
-     window.__fx.sheets = []; window.__fx.sweeps = [];
-     window.__fx.links = null; window.__fx.frost = null; window.__fx.matrix = null; true;`);
+  // Wrapped in an IIFE deliberately: executeJavaScript evaluates in the page's
+  // global scope, so a bare `const` here is redeclared on the second call and
+  // throws — which reads as "the effect is broken" rather than "the harness is".
+  const reset = () => win.webContents.executeJavaScript(`
+    (function () {
+      const fx = window.__fx;
+      fx.particles = []; fx.rings = []; fx.bolts = [];
+      fx.sheets = []; fx.sweeps = [];
+      fx.links = null; fx.frost = null; fx.matrix = null;
+      fx.noise = null; fx.grid = null; fx.traces = null; fx.tracers = null;
+      // The DOM-driven ones latch a class rather than living in an array.
+      const app = document.getElementById('app');
+      if (app) app.classList.remove('vhs', 'glitch', 'shake');
+      const scan = document.getElementById('fx-scanlines');
+      if (scan) scan.classList.remove('go');
+      return true;
+    })();`);
 
   console.log('point effects:');
   for (const [name, delay] of POINT) {
@@ -148,6 +164,45 @@ async function run() {
     true;`);
   await wait(700);
   await shoot(win, 'spans');
+
+  // The consuming spans are the only effects that animate real characters AND
+  // throw particles off them, so a single frame can't show whether they work.
+  // Catch one burn at three points and you can see the flame front travel.
+  console.log('burn (a sequence — the front should move left→right):');
+  await reset();
+  const layout = (fx, text, args) => win.webContents.executeJavaScript(`
+    (function () {
+      const t = document.getElementById('transcript');
+      t.innerHTML = '';
+      const line = document.createElement('div');
+      line.className = 'line assistant'; line.style.fontSize = '34px'; line.style.marginTop = '40px';
+      const body = document.createElement('div'); body.className = 'body';
+      const span = document.createElement('span');
+      span.dataset.fx = '${fx}'; span.className = 'fx-${fx}';
+      for (const ch of ${JSON.stringify(text)}) {
+        const i = document.createElement('i'); i.textContent = ch; span.appendChild(i);
+      }
+      body.appendChild(span); line.appendChild(body); t.appendChild(line);
+      window.__tfx = window.__tfx || new window.FlourishTextFX(window.__fx);
+      window.__tfx.play('${fx}', span, ${JSON.stringify(args)});
+      return span.children.length;
+    })();`);
+
+  await layout('burn', 'this idea is dead and gone', 'right gale');
+  for (const [label, at] of [['burn-1-catch', 260], ['burn-2-spread', 560], ['burn-3-ash', 1100]]) {
+    await wait(at === 260 ? at : 300);
+    await shoot(win, label);
+  }
+  await wait(900);
+  await shoot(win, 'burn-4-consumed');
+
+  await reset();
+  await layout('cascade', 'scrolling out of existence', 'right');
+  await wait(620);
+  await shoot(win, 'cascade');
+  await wait(400);
+  await reset();
+  await win.webContents.executeJavaScript(`document.getElementById('transcript').innerHTML = ''; true;`);
 
   console.log('prompt-box typing heat:');
   // Drive the input the way a keyboard would: set the value, then dispatch the

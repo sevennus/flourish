@@ -334,6 +334,84 @@ body {
   94% { opacity: 0; transform: scale(0.5) rotate(140deg); }
 }
 
+/* Consuming spans — textfx.js drives these per character from JS, so there's
+   deliberately no animation here to fight it. These rules only give each
+   character its own box to burn in; colour, glow, jitter and opacity are all
+   set from script. `will-change` matters: ~40 characters taking per-frame
+   transform and opacity writes need their own compositor layers. */
+.fx-burn, .fx-cascade { display: inline-block; }
+.fx-burn > i, .fx-cascade > i {
+  display: inline-block; font-style: normal;
+  will-change: transform, opacity, color;
+}
+/* A burnt-out span keeps its width, so the paragraph never reflows around the
+   hole it just ate — see the header of textfx.js. */
+.fx-burn[data-burnt="1"] > i { opacity: 0; }
+
+/* The bytes underneath the text (renderer.js swaps the glyph, then .settled) */
+.fx-hexdump { display: inline-block; }
+.fx-hexdump > i {
+  display: inline-block; font-style: normal;
+  color: #ffb14e; text-shadow: 0 0 8px rgba(255,157,60,0.7);
+  transition: color 0.35s ease, text-shadow 0.35s ease;
+}
+.fx-hexdump > i.settled { color: inherit; text-shadow: none; }
+
+/* Projected, not printed: cyan, scanlined, never quite stable. */
+.fx-hologram {
+  color: #9fe8ff;
+  text-shadow: 0 0 6px #37b6ff, 0 0 18px rgba(55,182,255,0.6);
+  background: repeating-linear-gradient(
+    180deg, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+    rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.4) 3px);
+  animation: hologram 3.2s ease-in-out infinite;
+}
+@keyframes hologram {
+  0%, 47%, 100% { opacity: 0.92; transform: translateX(0); }
+  48% { opacity: 0.55; transform: translateX(1.5px) skewX(-1.4deg); }
+  50% { opacity: 0.95; transform: translateX(-1px) skewX(1deg); }
+  52% { opacity: 0.85; transform: translateX(0); }
+  79% { opacity: 0.9; }
+  80% { opacity: 0.6; transform: translateX(-1.5px); }
+  82% { opacity: 0.92; transform: translateX(0); }
+}
+
+/* ---- CRT / cyberpunk full-screen ---- */
+
+/* Scanlines over everything, with the slow vertical roll of a set that needs
+   its hold adjusting. A fixed overlay rather than canvas work: it's a repeating
+   gradient, so it composites on the GPU and costs nothing per frame. */
+#fx-scanlines {
+  position: fixed; inset: 0; z-index: 45; pointer-events: none; opacity: 0;
+  background:
+    repeating-linear-gradient(
+      180deg, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.28) 3px, rgba(0,0,0,0.28) 4px),
+    linear-gradient(180deg, var(--scan-color, rgba(53,240,160,0.35)), transparent 18%);
+  background-size: 100% 4px, 100% 260px;
+}
+#fx-scanlines.go { animation: scanroll 3.4s linear 1; }
+@keyframes scanroll {
+  0% { opacity: 0; background-position: 0 0, 0 -260px; }
+  12% { opacity: 1; }
+  82% { opacity: 1; }
+  100% { opacity: 0; background-position: 0 0, 0 100vh; }
+}
+
+/* Tracking error. Same steps(1,end) discipline as #app.glitch — the picture has
+   to SNAP between offsets; interpolating averages the tear away to a wobble. */
+#app.vhs { animation: vhs 0.9s linear 1; }
+@keyframes vhs {
+  0% { transform: translateX(0); filter: none; animation-timing-function: steps(1, end); }
+  14% { transform: translateX(9px) skewX(-0.6deg); filter: saturate(1.6) drop-shadow(-3px 0 rgba(255,45,111,0.7)); animation-timing-function: steps(1, end); }
+  22% { transform: translateX(-5px); filter: saturate(0.6) brightness(1.2); animation-timing-function: steps(1, end); }
+  38% { transform: translateX(3px) skewX(0.5deg); filter: none; animation-timing-function: steps(1, end); }
+  56% { transform: translateX(-11px) skewX(0.9deg); filter: saturate(1.8) drop-shadow(4px 0 rgba(45,214,255,0.7)); animation-timing-function: steps(1, end); }
+  70% { transform: translateX(2px); filter: brightness(1.35); animation-timing-function: steps(1, end); }
+  88% { transform: translateX(-2px); filter: none; animation-timing-function: steps(1, end); }
+  100% { transform: translateX(0); filter: none; }
+}
+
 /* ---- automatic highlights ----
    Applied by renderer.js to things the model never marked up — inline code,
    **bold**, and bare numbers. Deliberately quieter than any {{fx:}} span: this

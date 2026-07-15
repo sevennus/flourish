@@ -77,6 +77,40 @@
     return s;
   }
 
+  // Glyph alphabets for matrix / cascade.
+  //
+  // Half-width katakana is the classic look, but plenty of monospace fonts
+  // don't carry it — this VM's doesn't, and `matrix` rendered as a screen of
+  // notdef boxes for two releases because a tofu box at 13px in a dark terminal
+  // reads as "some glyph" until you actually look. Windows finds a fallback
+  // font and is fine; a bare Linux box is not. So: detect once, and use an
+  // alphabet the font can actually draw.
+  const KATAKANA = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ';
+  const ASCII_GLYPHS = '01<>[]{}/\\=+*^?#%&@$§±¤¦╱╲╳▓▒░';
+  let _kana = null;
+  function kanaOK() {
+    if (_kana !== null) return _kana;
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = 24;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      const draw = (ch) => {
+        g.clearRect(0, 0, 24, 24);
+        g.fillStyle = '#fff'; g.font = '16px monospace'; g.textBaseline = 'top';
+        g.fillText(ch, 2, 2);
+        return g.getImageData(0, 0, 24, 24).data.join(',');
+      };
+      // U+FFFE is a permanent noncharacter — it can never have a real glyph, so
+      // whatever it draws IS this font stack's notdef box. If katakana draws the
+      // same pixels, we're looking at tofu.
+      _kana = draw('ｱ') !== draw('￾');
+    } catch (e) {
+      _kana = false;   // no canvas readback? assume the safe alphabet.
+    }
+    return _kana;
+  }
+  const glyphAlphabet = () => (kanaOK() ? KATAKANA : ASCII_GLYPHS);
+
   // Hard cap: a runaway effect (or an over-caffeinated typist) must never be
   // able to grind the frame rate down. Oldest particles are shed first.
   const MAX_PARTICLES = 16000;
@@ -148,6 +182,12 @@
         case 'rain': this._rain(o); break;
         case 'beam': this._beam(o); break;
         case 'implode': this._implode(x, y, o); break;
+        case 'scanlines': this._scanlines(o); break;
+        case 'static': this._static(o); break;
+        case 'vhs': this._vhs(); break;
+        case 'grid': this._grid(o); break;
+        case 'circuit': this._circuit(o); break;
+        case 'tracer': this._tracer(x, y, o); break;
         default: return;
       }
       this._ensureRunning();
@@ -180,6 +220,23 @@
           len: o.len,
         });
       }
+      this._ensureRunning();
+    }
+
+    /**
+     * Drop a single character down the screen as a Matrix glyph — the primitive
+     * `cascade` uses to pull a line of text apart. It starts as the real
+     * character and degrades into junk as it falls, so you can watch a word
+     * stop being a word.
+     */
+    glyphFall(x, y, ch) {
+      this.particles.push({
+        x, y, vx: rand(-0.5, 0.5), vy: rand(1.2, 3.4),
+        life: 0, max: rand(1100, 2000), size: 13,
+        color: chance(0.25) ? '#d2ffe1' : '#35f0a0',
+        grav: 0.055, drag: 1, shape: 'glyph',
+        ch: ch, glyphs: glyphAlphabet(), decay: rand(0.25, 0.6),
+      });
       this._ensureRunning();
     }
 
@@ -347,7 +404,11 @@
           len: 6 + ((Math.random() * 10) | 0),
         });
       }
-      this.matrix = { drops, life: 0, max: v === 2 ? 3200 : 2200, color: o.pal ? _rgb(o.pal[0]) : '53,240,160' };
+      this.matrix = {
+        drops, life: 0, max: v === 2 ? 3200 : 2200,
+        color: o.pal ? _rgb(o.pal[0]) : '53,240,160',
+        glyphs: glyphAlphabet(),
+      };
     }
 
     // A bolt from the top of the screen down to the caret, with branches,
@@ -717,6 +778,105 @@
       }, 820);
     }
 
+    // ---- cyberpunk ----
+
+    // CRT scanlines, with the slow vertical roll of a set that needs its hold
+    // adjusting. DOM rather than canvas: it's a repeating gradient, and CSS
+    // animates it for free.
+    _scanlines(o) {
+      const app = document.getElementById('app');
+      if (!app) return;
+      let el = document.getElementById('fx-scanlines');
+      if (!el) { el = document.createElement('div'); el.id = 'fx-scanlines'; document.body.appendChild(el); }
+      el.style.setProperty('--scan-color', o.pal ? `rgba(${_rgb(o.pal[0])},0.5)` : 'rgba(53,240,160,0.35)');
+      el.classList.remove('go'); void el.offsetWidth; el.classList.add('go');
+      clearTimeout(this._scanT);
+      this._scanT = setTimeout(() => el.classList.remove('go'), 3400);
+    }
+
+    // TV static. Noise is generated into a small offscreen buffer and blown up
+    // to full screen — 160x100 random pixels a frame is nothing, whereas
+    // per-pixel noise at 1120x720 is 800k writes and would drop the frame.
+    _static(o) {
+      if (!this._noiseBuf) {
+        this._noiseBuf = document.createElement('canvas');
+        this._noiseBuf.width = 160; this._noiseBuf.height = 100;
+      }
+      // Peak alpha is deliberately restrained. At 0.5 this covers the whole
+      // screen and the reader loses the sentence for half a second — "signal
+      // lost" is the meaning, not an instruction to actually blind them.
+      this.noise = { life: 0, max: rand(500, 900), alpha: Math.min(0.5, 0.3 * o.scale) };
+    }
+
+    // Tracking error: bands of the picture shifted sideways, snapping between
+    // offsets rather than sliding.
+    _vhs() {
+      const app = document.getElementById('app');
+      if (!app) return;
+      app.classList.remove('vhs'); void app.offsetWidth; app.classList.add('vhs');
+      setTimeout(() => app.classList.remove('vhs'), 900);
+    }
+
+    // Synthwave perspective grid rushing toward the viewer.
+    _grid(o) {
+      this.grid = {
+        life: 0, max: rand(2600, 3600),
+        color: o.pal ? _rgb(o.pal[0]) : '183,76,255',
+        speed: rand(0.0016, 0.0032) * o.scale,
+        rows: 22,
+      };
+    }
+
+    // PCB traces: Manhattan-routed paths that light up from the edges inward,
+    // with a pad at each end. Right angles are the whole point — it's the
+    // orthogonal cousin of frost's organic branching.
+    _circuit(o) {
+      const c = o.pal ? _rgb(o.pal[0]) : '53,240,160';
+      const n = Math.round((7 + variant(6)) * o.scale);
+      const segs = [], pads = [];
+      for (let i = 0; i < n; i++) {
+        const horiz = chance(0.5);
+        let x = horiz ? (chance(0.5) ? -6 : this.w + 6) : rand(0, this.w);
+        let y = horiz ? rand(0, this.h) : (chance(0.5) ? -6 : this.h + 6);
+        let dx = horiz ? (x < 0 ? 1 : -1) : 0;
+        let dy = horiz ? 0 : (y < 0 ? 1 : -1);
+        let at = 0;
+        const legs = 3 + ((Math.random() * 4) | 0);
+        for (let k = 0; k < legs; k++) {
+          const len = rand(50, 190);
+          const nx = x + dx * len, ny = y + dy * len;
+          segs.push({ x1: x, y1: y, x2: nx, y2: ny, at, w: rand(1, 2.2) });
+          at += rand(0.05, 0.13);
+          x = nx; y = ny;
+          // Turn 90°: swap which axis we travel on.
+          if (dx) { dy = chance(0.5) ? 1 : -1; dx = 0; } else { dx = chance(0.5) ? 1 : -1; dy = 0; }
+        }
+        pads.push({ x, y, at, r: rand(2.5, 5) });
+      }
+      this.traces = { segs, pads, life: 0, max: 2800, color: c };
+    }
+
+    // Light cycles: heads that run, turn at right angles, and leave a glowing
+    // trail that fades from the tail.
+    _tracer(x, y, o) {
+      const cols = o.pal || ['#35f0a0', '#37b6ff', '#ff2d6f', '#ffd27a'];
+      const n = 3 + variant(4);
+      const heads = [];
+      for (let i = 0; i < n; i++) {
+        const horiz = chance(0.5);
+        heads.push({
+          x: x + rand(-40, 40), y: y + rand(-30, 30),
+          dx: horiz ? (chance(0.5) ? 1 : -1) : 0,
+          dy: horiz ? 0 : (chance(0.5) ? 1 : -1),
+          sp: rand(4, 9) * o.scale,
+          trail: [], maxTrail: 90 + ((Math.random() * 70) | 0),
+          nextTurn: rand(140, 420), since: 0,
+          color: pick(cols),
+        });
+      }
+      this.tracers = { heads, life: 0, max: rand(2200, 3200) };
+    }
+
     // ---- full-screen (DOM-driven) effects ----
     _flash(color) {
       let el = document.getElementById('pulse-flash');
@@ -747,7 +907,8 @@
     // ---- animation loop ----
     _busy() {
       return this.particles.length || this.rings.length || this.bolts.length
-        || this.sheets.length || this.sweeps.length || this.links || this.frost || this.matrix;
+        || this.sheets.length || this.sweeps.length || this.links || this.frost || this.matrix
+        || this.noise || this.grid || this.traces || this.tracers;
     }
 
     _ensureRunning() {
@@ -858,6 +1019,29 @@
         for (const d of this.matrix.drops) { d.y += d.sp * f; if (d.y > this.h) d.y = rand(-40, 0); }
         if (this.matrix.life >= this.matrix.max) this.matrix = null;
       }
+
+      if (this.noise) { this.noise.life += dt; if (this.noise.life >= this.noise.max) this.noise = null; }
+      if (this.grid) { this.grid.life += dt; if (this.grid.life >= this.grid.max) this.grid = null; }
+      if (this.traces) { this.traces.life += dt; if (this.traces.life >= this.traces.max) this.traces = null; }
+
+      if (this.tracers) {
+        this.tracers.life += dt;
+        for (const h of this.tracers.heads) {
+          h.since += dt;
+          if (h.since >= h.nextTurn) {
+            h.since = 0; h.nextTurn = rand(140, 420);
+            if (h.dx) { h.dy = chance(0.5) ? 1 : -1; h.dx = 0; } else { h.dx = chance(0.5) ? 1 : -1; h.dy = 0; }
+          }
+          h.x += h.dx * h.sp * f; h.y += h.dy * h.sp * f;
+          // Wrap rather than die, so a cycle can't quietly leave the screen and
+          // strand the effect with nothing to draw.
+          if (h.x < -20) h.x = this.w + 20; else if (h.x > this.w + 20) h.x = -20;
+          if (h.y < -20) h.y = this.h + 20; else if (h.y > this.h + 20) h.y = -20;
+          h.trail.push({ x: h.x, y: h.y });
+          if (h.trail.length > h.maxTrail) h.trail.shift();
+        }
+        if (this.tracers.life >= this.tracers.max) this.tracers = null;
+      }
     }
 
     _draw() {
@@ -889,18 +1073,104 @@
         ctx.restore();
       }
 
+      // Synthwave grid — behind everything, like the aurora.
+      if (this.grid) {
+        const G = this.grid;
+        const t = G.life / G.max;
+        const a = Math.sin(Math.min(1, t) * Math.PI) * 0.8;
+        const hz = this.h * 0.52;          // horizon
+        const cx = this.w / 2;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = `rgba(${G.color},${a * 0.5})`;
+        ctx.lineWidth = 1;
+        // Verticals all converge on the vanishing point.
+        for (let i = -14; i <= 14; i++) {
+          ctx.beginPath(); ctx.moveTo(cx, hz);
+          ctx.lineTo(cx + i * 150, this.h); ctx.stroke();
+        }
+        // Horizontals: squaring the row fraction is what gives the ground its
+        // perspective — rows bunch at the horizon and stretch toward you.
+        const scroll = (G.life * G.speed) % 1;
+        for (let k = 0; k < G.rows; k++) {
+          const p = ((k + scroll) / G.rows);
+          const y = hz + (this.h - hz) * p * p;
+          ctx.strokeStyle = `rgba(${G.color},${a * (0.15 + p * 0.6)})`;
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(this.w, y); ctx.stroke();
+        }
+        // A hot line on the horizon itself sells the sunset.
+        ctx.strokeStyle = `rgba(255,255,255,${a * 0.5})`;
+        ctx.beginPath(); ctx.moveTo(0, hz); ctx.lineTo(this.w, hz); ctx.stroke();
+        ctx.restore();
+      }
+
+      // Circuit traces reveal from the edges inward, then fade.
+      if (this.traces) {
+        const T = this.traces;
+        const t = T.life / T.max;
+        const fade = t > 0.72 ? 1 - (t - 0.72) / 0.28 : 1;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineCap = 'square'; ctx.lineJoin = 'miter';
+        for (const s of T.segs) {
+          if (s.at > t * 1.5) continue;
+          ctx.strokeStyle = `rgba(${T.color},${0.7 * fade})`;
+          ctx.lineWidth = s.w;
+          ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+        }
+        for (const p of T.pads) {
+          if (p.at > t * 1.5) continue;
+          ctx.fillStyle = `rgba(${T.color},${0.85 * fade})`;
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // Light-cycle trails: bright at the head, fading to the tail.
+      if (this.tracers) {
+        const t = this.tracers.life / this.tracers.max;
+        const fade = t > 0.75 ? 1 - (t - 0.75) / 0.25 : 1;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        for (const h of this.tracers.heads) {
+          if (h.trail.length < 2) continue;
+          const rgb = _rgb(h.color);
+          for (const pass of [{ w: 7, a: 0.16 }, { w: 2.4, a: 0.55 }, { w: 1, a: 1 }]) {
+            ctx.strokeStyle = `rgba(${rgb},${pass.a * fade})`;
+            ctx.lineWidth = pass.w;
+            ctx.beginPath();
+            // A wrap teleports the head across the screen; starting a new
+            // subpath on the jump stops it drawing a line back through
+            // everything.
+            let started = false;
+            for (let i = 0; i < h.trail.length; i++) {
+              const p = h.trail[i], q = h.trail[i - 1];
+              if (!started || (q && Math.hypot(p.x - q.x, p.y - q.y) > 60)) { ctx.moveTo(p.x, p.y); started = true; }
+              else ctx.lineTo(p.x, p.y);
+            }
+            ctx.stroke();
+          }
+          const sprite = glowSprite(h.color);
+          ctx.drawImage(sprite, h.x - 9, h.y - 9, 18, 18);
+        }
+        ctx.restore();
+      }
+
       if (this.matrix) {
         const fade = 1 - this.matrix.life / this.matrix.max;
         const c = this.matrix.color;
+        const G = this.matrix.glyphs;
+        const rg = () => G[(Math.random() * G.length) | 0];
         ctx.font = '13px monospace';
         for (const d of this.matrix.drops) {
           ctx.fillStyle = `rgba(210,255,225,${0.95 * fade})`;
-          ctx.fillText(String.fromCharCode(0x30a0 + (Math.random() * 96 | 0)), d.x, d.y);
+          ctx.fillText(rg(), d.x, d.y);
           for (let k = 1; k < d.len; k++) {
             const ka = 0.4 - k * 0.035;
             if (ka <= 0) break;
             ctx.fillStyle = `rgba(${c},${ka * fade})`;
-            ctx.fillText(String.fromCharCode(0x30a0 + (Math.random() * 96 | 0)), d.x, d.y - k * 14);
+            ctx.fillText(rg(), d.x, d.y - k * 14);
           }
         }
       }
@@ -1041,6 +1311,18 @@
         if (p.twinkle) a *= 0.55 + Math.random() * 0.45;
         ctx.globalAlpha = Math.max(0, Math.min(1, a));
 
+        if (p.shape === 'glyph') {
+          // Falling text: the real character degrades into junk as it drops, so
+          // a word visibly stops being a word on the way down.
+          const t = p.life / p.max;
+          const junk = t > p.decay && chance(0.35);
+          if (junk) p.ch = p.glyphs[(Math.random() * p.glyphs.length) | 0];
+          ctx.font = p.size + 'px monospace';
+          ctx.fillStyle = p.color;
+          ctx.fillText(p.ch, p.x - p.size * 0.3, p.y);
+          continue;
+        }
+
         if (p.shape === 'streak') {
           const m = Math.hypot(p.vx, p.vy) || 1;
           const tx = p.x - (p.vx / m) * p.len, ty = p.y - (p.vy / m) * p.len;
@@ -1054,6 +1336,29 @@
         ctx.drawImage(sprite, p.x - d / 2, p.y - d / 2, d, d);
       }
       ctx.restore();
+
+      // TV static goes over everything — it's interference, not a light source.
+      if (this.noise) {
+        const N = this.noise;
+        const a = Math.sin(Math.min(1, N.life / N.max) * Math.PI) * N.alpha;
+        const buf = this._noiseBuf;
+        const g = buf.getContext('2d');
+        const img = g.createImageData(buf.width, buf.height);
+        const d = img.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const v = (Math.random() * 255) | 0;
+          d[i] = d[i + 1] = d[i + 2] = v;
+          // Punch holes so it reads as noise rather than fog — and so the text
+          // underneath stays partly legible through the gaps.
+          d[i + 3] = v > 140 ? 255 : 0;
+        }
+        g.putImageData(img, 0, 0);
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, a));
+        ctx.imageSmoothingEnabled = false;   // blocky, like a real dropout
+        ctx.drawImage(buf, 0, 0, this.w, this.h);
+        ctx.restore();
+      }
 
       // Opaque shapes (confetti, glass shards) paint normally, over the glow.
       for (const p of this.particles) {

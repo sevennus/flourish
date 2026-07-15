@@ -44,8 +44,8 @@ Tool calls (Read, Bash, Edit, …) show up as dim `⚙ Tool` lines that flip to
 
 ## The flourish protocol
 
-40 effects. **Point effects** fire once at the caret; **text spans** wrap text
-and must be closed.
+50 effects. **Point effects** fire once at the caret; **text spans** wrap text
+and must be closed; **consuming spans** destroy the text they wrap.
 
 | Point effect | Reads as |
 |---|---|
@@ -73,6 +73,12 @@ and must be closed.
 | `{{fx:shatter}}` | something broke hard |
 | `{{fx:glitch}}` | something broken or corrupt |
 | `{{fx:shake}}` | a failure |
+| `{{fx:scanlines}}` | retro, terminal, low-level |
+| `{{fx:static}}` | signal lost, garbage |
+| `{{fx:vhs}}` | degraded, old, unreliable |
+| `{{fx:grid}}` | synthwave, going somewhere |
+| `{{fx:circuit}}` | wiring, how it's connected |
+| `{{fx:tracer}}` | paths, routing, following a thread |
 
 | Text span | Reads as |
 |---|---|
@@ -90,8 +96,34 @@ and must be closed.
 | `{{fx:bounce}}…{{/fx:bounce}}` | upbeat |
 | `{{fx:stamp}}…{{/fx:stamp}}` | a verdict, a decision, final |
 | `{{fx:scramble}}…{{/fx:scramble}}` | text that decodes into place |
+| `{{fx:hexdump}}…{{/fx:hexdump}}` | raw bytes, low-level, machine |
+| `{{fx:hologram}}…{{/fx:hologram}}` | virtual, projected, not real |
 | `{{fx:redact}}…{{/fx:redact}}` | a bar slides away — a reveal |
 | `{{fx:color #ff0066}}…{{/fx:color}}` | any specific colour |
+
+### Consuming spans
+
+`{{fx:burn}}` and `{{fx:cascade}}` **destroy the text they wrap** — the
+characters catch, burn down and are gone, and the reader can't get them back.
+They're the only effects that can cost the reader something, so the system
+prompt scopes them hard: use them where the disappearing *is* the point (a
+deleted file, a dead idea, a revoked option), never as emphasis on a sentence
+someone needs to read. `npm test` asserts that guardrail is still in the prompt,
+because the engine will happily eat a load-bearing sentence and only that
+paragraph stops it.
+
+Both take a **wind** — `left`/`right` and `still`/`breeze`/`gale`, in either
+order: `{{fx:burn left gale}}`. Fire seeds on one random character and spreads
+outward; the wind makes the spread asymmetric (downwind races, upwind creeps),
+and that asymmetry is what you can actually watch travel. The propagation model
+is pure arithmetic in `flourish.js` (`planBurn`) so it's unit-tested rather than
+buried in a rAF loop.
+
+These are also the only effects that **bridge the two layers**: everything else
+either styles DOM or paints canvas, never both. `src/textfx.js` animates real
+characters *and* throws real particles off them — embers from the flame front,
+ash from consumed characters, falling glyphs for `cascade` — all from the same
+engine that draws a nova.
 
 Point effects take an optional **palette** (`mint` `ice` `gold` `ember` `violet`
 `rose` `mono`) and **size** (`sm` `md` `lg` `xl`), in either order —
@@ -109,9 +141,9 @@ the model never writes it).
 The parser is pure and streaming-safe (it handles a directive split across two
 network chunks), so it's unit-tested without a browser.
 
-`wave`, `bounce`, `scramble`, `stamp`, `corrupt` and `sparkle` render one `<i>`
-per character (`PER_CHAR_SPANS`) so they can stagger; everything else is a
-single styled span.
+`wave`, `bounce`, `scramble`, `stamp`, `corrupt`, `sparkle`, `hexdump`, `burn`
+and `cascade` render one `<i>` per character (`PER_CHAR_SPANS`) so they can
+stagger or be driven individually; everything else is a single styled span.
 
 ### Variety is mostly free
 
@@ -193,7 +225,7 @@ Pure-logic unit tests (parser, auto-highlighter, stream translator, command
 builder, and the vocabulary-vs-engine/CSS/prompt/tool-map seams):
 
 ```bash
-npm test           # node --test — 63 tests, no browser/VM needed
+npm test           # node --test — 78 tests, no browser/VM needed
 ```
 
 Headless GUI smoke test (renders the real UI under a virtual display → PNG):
@@ -206,7 +238,7 @@ Visual proof of every effect — fires each one in the real renderer and capture
 it mid-flight to `assets/fx/<name>.png`:
 
 ```bash
-npm run fx-shots             # needs xvfb; 37 frames
+npm run fx-shots             # needs xvfb; 48 frames
 ```
 
 Particle budget — fills the engine to each rung and counts real frames:
@@ -261,6 +293,8 @@ src/bridge.js    pure: ssh2 connect config + the remote command builder.
 src/ccstream.js  pure: Claude Code stream-json → app events (+ line buffer).
 src/flourish.js  pure: streaming flourish-directive parser + arg grammar (UMD).
 src/autofx.js    pure: streaming auto-highlighter for code/bold/numbers (UMD).
+src/textfx.js    the consuming spans (burn/cascade) — the one place the DOM text
+                 layer and the canvas particle layer meet.
 src/prompt.js    the flourish protocol appended to Claude Code's system prompt.
 src/effects.js   canvas particle engine + full-screen effects.
 src/inputfx.js   prompt-box typing sparks + the heat model.
@@ -306,6 +340,23 @@ tools/fx-bench.js  particle-budget benchmark (alternate Electron entry).
   chars/s regardless of how fast the model streamed (a 630-char reply finished
   painting **9.6s after the stream ended**). Now ~118 chars/s under software GL,
   and it speeds up the further behind it gets.
+- **Katakana is not guaranteed to have a glyph.** `matrix` shipped for two
+  releases rendering as a screen of notdef boxes on any machine whose monospace
+  font lacks half-width kana — this VM's does, and a tofu box at 13px in a dark
+  terminal reads as "some glyph" until you actually look at the capture. The
+  engine now draws `ｱ` and `U+FFFE` (a permanent noncharacter, so whatever it
+  draws *is* this font stack's notdef) to an offscreen canvas and compares
+  pixels: identical means no kana, and it falls back to an ASCII/box-drawing
+  alphabet. Windows finds a Japanese fallback font and still gets the classic
+  look. Don't hard-code a glyph alphabet — go through `glyphAlphabet()`.
+- **Consuming characters must not reflow the paragraph.** A burnt-out `<i>` goes
+  to `opacity: 0` in place and is never removed or `display:none`d — otherwise
+  the text visibly jumps around as it's eaten, which reads as a bug rather than
+  as fire.
+- **`executeJavaScript` evaluates in the page's global scope.** A bare `const`
+  in a harness snippet throws "already declared" the second time it runs, and
+  the failure surfaces as "the effect is broken" rather than "the harness is".
+  Wrap snippets in an IIFE.
 - **`tools/fx-shots.js` shows its window and disables background throttling.**
   A hidden or occluded Electron window throttles `requestAnimationFrame`, so
   particle life stops advancing, effects never expire, and each captured frame

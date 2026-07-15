@@ -263,7 +263,52 @@ test('the system prompt teaches exactly the vocabulary the parser accepts', () =
   }
 });
 
-test('the vocabulary is the full 40 effects', () => {
-  assert.strictEqual(POINT_EFFECTS.size, 24);
-  assert.strictEqual(STYLE_SPANS.size, 16);
+test('the vocabulary is the full 50 effects', () => {
+  assert.strictEqual(POINT_EFFECTS.size, 30);
+  assert.strictEqual(STYLE_SPANS.size, 20);
+});
+
+test('the consuming spans are taught with their guardrail', () => {
+  // burn/cascade destroy text the reader can't get back. The engine will
+  // happily eat a load-bearing sentence — the only thing stopping it is this
+  // paragraph, so its absence is a real defect, not a docs nit.
+  const { CONSUMING_SPANS } = require('../src/flourish');
+  for (const n of CONSUMING_SPANS) {
+    assert.ok(FLOURISH_SYSTEM_PROMPT.includes(`{{fx:${n}}}`), `prompt never teaches ${n}`);
+  }
+  assert.match(FLOURISH_SYSTEM_PROMPT, /DESTROY/,
+    'the prompt must say plainly that these destroy text');
+  assert.match(FLOURISH_SYSTEM_PROMPT, /NEVER burn a sentence the reader needs/,
+    'the prompt must scope consuming spans away from load-bearing text');
+});
+
+test('consuming spans are driven from JS, not CSS', () => {
+  // textfx.js animates these per character from script. A CSS animation on the
+  // same <i> would fight it for transform/opacity and the fire would stutter.
+  const { CONSUMING_SPANS } = require('../src/flourish');
+  const css = read('src/styles.css');
+  const rend = read('src/renderer.js');
+  for (const n of CONSUMING_SPANS) {
+    assert.ok(!new RegExp(`\\.fx-${n}\\s*>\\s*i\\s*\\{[^}]*animation:`).test(css),
+      `.fx-${n} > i must not carry a CSS animation — textfx.js drives it`);
+    assert.ok(!new RegExp(`'${n}'`).test(rend.slice(rend.indexOf('CSS_STAGGERED'), rend.indexOf('CSS_STAGGERED') + 200)),
+      `${n} must not be in CSS_STAGGERED`);
+  }
+  // The seam that actually bites: a name in CONSUMING_SPANS with no branch in
+  // textfx.play() is a span that eats the text and then does nothing with it.
+  const tfx = read('src/textfx.js');
+  for (const n of CONSUMING_SPANS) {
+    assert.ok(new RegExp(`name === '${n}'`).test(tfx), `textfx.js play() has no branch for ${n}`);
+    assert.ok(new RegExp(`_${n}\\s*\\(`).test(tfx), `textfx.js has no _${n}() implementation`);
+  }
+});
+
+test('the renderer plays consuming spans when they close', () => {
+  // They can only run once every character exists, which is the moment the
+  // closing directive lands. Igniting on open would set fire to a word that
+  // hadn't finished being typed.
+  const rend = read('src/renderer.js');
+  const close = rend.slice(rend.indexOf('function closeStyle'), rend.indexOf('function closeStyle') + 600);
+  assert.match(close, /CONSUMING_SPANS\.has\(name\)/, 'closeStyle must check for a consuming span');
+  assert.match(close, /textFX\.play\(/, 'closeStyle must hand off to textfx');
 });
