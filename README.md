@@ -231,6 +231,26 @@ npm run package:win
 Output: `dist/Flourish-win32-x64/Flourish.exe` — copy the folder/zip to your
 Windows 11 box and double-click. No install step.
 
+To pull it onto the Windows box, nginx serves the zip **over the tailnet only**
+(basic-auth, SimJim Admin — see `FENCE.md`):
+
+```
+http://100.76.34.62/dl/Flourish-win32-x64.zip
+```
+
+Or over SSH: `scp aiops@100.76.34.62:/var/www/simjim/apps/flourish/dist/Flourish-win32-x64.zip .`
+
+It is deliberately **not** reachable from simjim.net or dev.simjim.net. It's a
+142MB unsigned `.exe`; Windows SmartScreen will warn on first run either way
+("More info" → "Run anyway").
+
+Sanity-check a fresh package before shipping it — `--prune=true` has to keep
+every `src/` file the renderer loads, and a missing one is a blank window:
+
+```bash
+npx asar list dist/Flourish-win32-x64/resources/app.asar | grep src/
+```
+
 ## Architecture
 
 ```
