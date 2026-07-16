@@ -1,0 +1,23 @@
+=== counts ===
+scene       planned  painted  boxes  off-screen  own content   reaped 
+gibson      38       53693    3278   0           yes (glyphs)  yes     
+wardial     19       1384     0      0           19/19         yes     
+crack       13       2968     0      0           yes (glyphs)  yes     
+banner      7        5994     0      0           yes (glyphs)  yes     
+sniffer     6        349      0      0           6/6           yes     
+trace       9        900      0      0           9/9           yes     
+daemon      15       1304     0      0           15/15         yes     
+portscan    32       2868     0      0           32/32         yes     
+skull       80       4737     0      0           yes (glyphs)  yes     
+overflow    6        887      0      0           6/6           yes     
+
+=== verdict ===
+scenes probed:                   10
+planned content:                 10/10
+actually painted to the canvas:  10/10
+every draw inside the viewport:  10/10
+painted their OWN content:       10/10
+reaped themselves:               10/10
+threw:                           0
+
+ALL TEN SCENES PAINT WHAT THEY PLAN: yes

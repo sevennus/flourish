@@ -143,6 +143,12 @@ async function run() {
       fx.sheets = []; fx.sweeps = [];
       fx.links = null; fx.webs = null; fx.frost = null; fx.matrix = null;
       fx.noise = null; fx.grid = null; fx.traces = null; fx.tracers = null;
+      // Every ASCII scene lives in this one array, so the whole family is
+      // cleared by one line and an eleventh needs no edit here. That is the
+      // point of the array: this list is hand-maintained, the README warns
+      // that missing an entry makes an effect stack up across every later
+      // shot, and ten new fields would have been ten chances to do it.
+      fx.ascii = [];
       // The under-canvas isn't cleared by the loop once it stops running.
       if (fx.under) fx.under.clearRect(0, 0, fx.w, fx.h);
       // The DOM-driven ones latch a class rather than living in an array.

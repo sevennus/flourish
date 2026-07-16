@@ -1,19 +1,19 @@
 /*
- * effects.js — the canvas particle engine and full-screen effects.
+ * effects.js â the canvas particle engine and full-screen effects.
  *
  * Classic browser script: attaches window.FlourishEffects. The renderer creates
  * one instance over the overlay canvas and calls fire(name, x, y, opts) at the
  * caret position when the parser reports a point effect.
  *
  * Drawing model: most particles are drawn additively ('lighter') so overlapping
- * ones bloom into each other instead of muddying — that plus a cached glow
+ * ones bloom into each other instead of muddying â that plus a cached glow
  * sprite is what makes a burst read as light rather than as confetti dots.
  * Opaque shapes (confetti rects, glass shards) opt out via `solid: true`.
  *
  * Variety comes from three places, in increasing cost:
- *   1. VARIANTS — most effects pick one of several structural forms at random,
+ *   1. VARIANTS â most effects pick one of several structural forms at random,
  *      so the same directive never paints the same picture twice. Free.
- *   2. ARGS — `{{fx:spark gold lg}}` recolours and resizes. The renderer parses
+ *   2. ARGS â `{{fx:spark gold lg}}` recolours and resizes. The renderer parses
  *      these (Flourish.parseArgs) and passes {palette, scale}.
  *   3. New effect names, which cost system-prompt tokens on every request and
  *      so are added deliberately rather than freely.
@@ -23,7 +23,7 @@
 
   const TAU = Math.PI * 2;
 
-  // Geometry rules for apophenia's anchors live in the parser module — pure, so
+  // Geometry rules for apophenia's anchors live in the parser module â pure, so
   // `node --test` can reach them. Falling back to the old "fewer than 3 points"
   // test if it isn't loaded keeps this file standalone rather than throwing.
   const anchorsFlat = (window.Flourish && window.Flourish.anchorsFlat)
@@ -61,7 +61,7 @@
   // Glow sprites.
   //
   // The obvious way to halo a particle is ctx.shadowBlur, but Chromium
-  // rasterizes canvas2d shadows on the CPU, per draw call — with 180 glowing
+  // rasterizes canvas2d shadows on the CPU, per draw call â with 180 glowing
   // particles that measured ~6fps (vs ~70fps for the same count of un-blurred
   // confetti rects). Instead each colour gets its radial falloff baked into a
   // 64px offscreen canvas once, and every particle is a single drawImage of it.
@@ -94,13 +94,13 @@
   // Glyph alphabets for matrix / cascade.
   //
   // Half-width katakana is the classic look, but plenty of monospace fonts
-  // don't carry it — this VM's doesn't, and `matrix` rendered as a screen of
+  // don't carry it â this VM's doesn't, and `matrix` rendered as a screen of
   // notdef boxes for two releases because a tofu box at 13px in a dark terminal
   // reads as "some glyph" until you actually look. Windows finds a fallback
   // font and is fine; a bare Linux box is not. So: detect once, and use an
   // alphabet the font can actually draw.
-  const KATAKANA = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ';
-  const ASCII_GLYPHS = '01<>[]{}/\\=+*^?#%&@$§±¤¦╱╲╳▓▒░';
+  const KATAKANA = 'ï½±ï½²ï½³ï½´ï½µï½¶ï½·ï½¸ï½¹ï½ºï½»ï½¼ï½½ï½¾ï½¿ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾ï¾';
+  const ASCII_GLYPHS = '01<>[]{}/\\=+*^?#%&@$Â§Â±Â¤Â¦â±â²â³âââ';
   let _kana = null;
   function kanaOK() {
     if (_kana !== null) return _kana;
@@ -114,16 +114,40 @@
         g.fillText(ch, 2, 2);
         return g.getImageData(0, 0, 24, 24).data.join(',');
       };
-      // U+FFFE is a permanent noncharacter — it can never have a real glyph, so
+      // U+FFFE is a permanent noncharacter â it can never have a real glyph, so
       // whatever it draws IS this font stack's notdef box. If katakana draws the
       // same pixels, we're looking at tofu.
-      _kana = draw('ｱ') !== draw('￾');
+      _kana = draw('ï½±') !== draw('ï¿¾');
     } catch (e) {
       _kana = false;   // no canvas readback? assume the safe alphabet.
     }
     return _kana;
   }
   const glyphAlphabet = () => (kanaOK() ? KATAKANA : ASCII_GLYPHS);
+
+  // ---- ASCII scenes ----
+  //
+  // Content comes from the parser module, where it's pure and a test can call
+  // it with a fixed seed. Everything below is the drawing only. If a planner
+  // is missing the scene must not paint at all â see _scene.
+  const A = window.Flourish || {};
+  const ASCII_EFFECTS = A.ASCII_EFFECTS || new Set();
+  const ASCII_PLAN = {
+    wardial: A.planWardial, sniffer: A.planSniffer, trace: A.planTrace,
+    daemon: A.planDaemon, portscan: A.planPortscan, overflow: A.planOverflow,
+    crack: A.planCrack, gibson: A.planGibson,
+  };
+
+  // The terminal's own stack, so a scene sits in the same face as the prose
+  // behind it. Never assume the advance width of this â measure it. The stack
+  // resolves differently per platform and a hard-coded cell width shears every
+  // scene a little further right on each column.
+  const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace';
+
+  // What a cell spins through before it locks. Deliberately not glyphAlphabet():
+  // these scenes are ASCII pretending to be a machine, and katakana in a
+  // hexdump reads as a different effect leaking in.
+  const CRACK_CHARSET = (A.CRACK_CHARSET) || 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
 
   // Hard cap: a runaway effect (or an over-caffeinated typist) must never be
   // able to grind the frame rate down. Oldest particles are shed first.
@@ -150,6 +174,12 @@
       this.webs = null;   // apophenia
       this.frost = null;  // creeping ice
       this.matrix = null;
+      // Every ASCII scene, in one array rather than ten fields. A `this.<name>`
+      // per effect has to be remembered in four places â _busy, _update, _draw
+      // and fx-shots' reset â and the README records what forgetting the fourth
+      // costs: the effect quietly stacks up across every later shot. Ten new
+      // fields would be ten chances to pay that. This is one.
+      this.ascii = [];
       this.running = false;
       this._resize = this._resize.bind(this);
       this._resize();
@@ -174,7 +204,7 @@
     /**
      * Fire a named point effect at (x, y).
      * `opts` is {palette, scale} as parsed from the directive's args by
-     * Flourish.parseArgs — both optional.
+     * Flourish.parseArgs â both optional.
      */
     fire(name, x, y, opts) {
       x = (typeof x === 'number') ? x : this.w / 2;
@@ -215,13 +245,22 @@
         case 'grid': this._grid(o); break;
         case 'circuit': this._circuit(o); break;
         case 'tracer': this._tracer(x, y, o); break;
-        default: return;
+        default:
+          // The ASCII register dispatches off one set rather than ten cases, so
+          // an eleventh scene costs no line here. Anything else still falls
+          // through to painting nothing, which is what `default: return` always
+          // meant â a typo costs the effect, never a wrong one.
+          if (ASCII_EFFECTS.has(name) && typeof this['_' + name] === 'function') {
+            this['_' + name](x, y, o);
+            break;
+          }
+          return;
       }
       this._ensureRunning();
     }
 
     /**
-     * Public particle emitter — the small, composable burst the input-box
+     * Public particle emitter â the small, composable burst the input-box
      * typing layer builds on. Everything is optional but `x`/`y`.
      */
     emit(x, y, opts) {
@@ -251,7 +290,7 @@
     }
 
     /**
-     * Drop a single character down the screen as a Matrix glyph — the primitive
+     * Drop a single character down the screen as a Matrix glyph â the primitive
      * `cascade` uses to pull a line of text apart. It starts as the real
      * character and degrades into junk as it falls, so you can watch a word
      * stop being a word.
@@ -268,14 +307,14 @@
     }
 
     /**
-     * Fly one character across the window and land it on a target — the
+     * Fly one character across the window and land it on a target â the
      * primitive `salvage` uses to assemble a line out of letters it took from
      * text already on screen. The mirror of glyphFall: that one hands a
      * character from the DOM to the canvas and drops it, this one carries a
      * character over the canvas and hands it back.
      *
      * Two things it deliberately does not do. It never degrades the glyph the
-     * way glyphFall does — a salvaged letter has to arrive as itself, because
+     * way glyphFall does â a salvaged letter has to arrive as itself, because
      * the whole claim is that this exact letter was already up there. And it
      * doesn't fade out at the end of its life: it lands at full strength and
      * `onLand` reveals the real character underneath it on the same frame, so
@@ -285,7 +324,7 @@
      * The arc is a quadratic bezier with the control point kicked perpendicular
      * to the flight path, so letters coming from the same place don't travel in
      * a bundle of parallel lines. `font` comes from the caller because the
-     * engine can't read the DOM — a flier in the wrong face stops looking like
+     * engine can't read the DOM â a flier in the wrong face stops looking like
      * the letter it's about to become.
      */
     glyphFly(x0, y0, x1, y1, ch, o) {
@@ -307,8 +346,8 @@
         color: o.color || '#7effc4',
         onLand: o.onLand,
         // Both endpoints are viewport coordinates of text that keeps scrolling
-        // under the flier. `drift` hands back one number — how far the
-        // transcript has scrolled — and the whole path rides it, so the letter
+        // under the flier. `drift` hands back one number â how far the
+        // transcript has scrolled â and the whole path rides it, so the letter
         // stays aimed at the character rather than at the hole it left. The
         // engine still never touches the DOM: this is a closure that returns a
         // number, the same deal as onLand.
@@ -350,7 +389,7 @@
           }
           break;
         }
-        default: { // ring snap — all at one speed, so it reads as a shell
+        default: { // ring snap â all at one speed, so it reads as a shell
           const sp = rand(4, 6) * s;
           for (let i = 0; i < n; i++) {
             const a = (i / n) * TAU + rand(-0.05, 0.05);
@@ -393,7 +432,7 @@
             });
           }
         }
-      } else if (v === 1) { // willow — slow, heavy, drooping trails
+      } else if (v === 1) { // willow â slow, heavy, drooping trails
         for (let i = 0; i < 200 * s; i++) {
           const a = rand(0, TAU), sp = rand(1.5, 6) * s;
           this._dot(x, y, a, sp, cols, {
@@ -496,7 +535,7 @@
      * Lightning: a stepped leader, then a return stroke.
      *
      * The old one interpolated a straight line from origin to target and
-     * jittered the points. Noise on a line is a noisy line — it can't be
+     * jittered the points. Noise on a line is a noisy line â it can't be
      * anything but a stick, because the structure it needs isn't in there at
      * any scale. Real channels are self-similar, so the path is built by
      * MIDPOINT DISPLACEMENT instead: take a segment, push its midpoint along
@@ -505,7 +544,7 @@
      * lightning and a twig.
      *
      * Forks are the other half of the stick problem. The old branches were
-     * four-point random walks stapled on at random indices — so they read as
+     * four-point random walks stapled on at random indices â so they read as
      * separate debris rather than as the channel splitting. These leave a real
      * point on the trunk, inherit the trunk's local heading, and are built by
      * the same displacement at lower detail, so a fork is just a smaller bolt.
@@ -514,7 +553,7 @@
      * so the draw loop painted the whole path from the first frame and only
      * faded the alpha. Growth here is a STAIRCASE, not a ramp. A real leader
      * advances in discrete jumps with dark pauses between them, and a smooth
-     * reveal reads as a wipe — the jumps are the erratic part, and the erratic
+     * reveal reads as a wipe â the jumps are the erratic part, and the erratic
      * part is what sells it. When the tip lands, the return stroke lights the
      * whole channel at once. That flash IS the strike, and it's the instant the
      * word underneath catches fire.
@@ -524,7 +563,7 @@
       const c = o.pal ? _rgb(o.pal[0]) : null;
 
       // Strike real words, several per screen. The renderer hands their rects
-      // in via o.anchors — the same channel apophenia used, and the reason its
+      // in via o.anchors â the same channel apophenia used, and the reason its
       // geometry outlived it. With nothing on screen to hit, strike the caret,
       // which is where every effect fires by default anyway.
       const targets = (o.anchors && o.anchors.length)
@@ -609,7 +648,7 @@
       const n = Math.round(520 * s);
       const v = variant(3);
       for (let i = 0; i < n; i++) {
-        // v0 even sphere · v1 layered shells · v2 spiked star
+        // v0 even sphere Â· v1 layered shells Â· v2 spiked star
         let a = rand(0, TAU);
         let sp = rand(2, 13);
         if (v === 1) sp = pick([3, 7, 11]) * rand(0.9, 1.1);
@@ -691,7 +730,7 @@
     // ---- new effects ----
 
     // Slow curtains of light drifting across the upper screen. Ambient and
-    // quiet — the opposite end of the register from nova.
+    // quiet â the opposite end of the register from nova.
     _aurora(o) {
       const cols = o.pal || ['#35f0a0', '#37b6ff', '#b47cff'];
       const n = 3 + variant(3);   // 3-5 curtains
@@ -733,12 +772,12 @@
      *
      * Every difference from _constellation is the joke:
      *
-     *  - Constellation links by DISTANCE, which is a real relationship — nearby
+     *  - Constellation links by DISTANCE, which is a real relationship â nearby
      *    dots belong together, and the picture it assembles is true. Apophenia
      *    links by nothing at all. Pairs are drawn at random and the length of
      *    the line is not evidence of anything.
      *  - Constellation's dots are scattered. Apophenia's land on real WORDS
-     *    (the renderer passes their rects in via o.anchors — the engine still
+     *    (the renderer passes their rects in via o.anchors â the engine still
      *    never reads the DOM), so it looks like it has found something in the
      *    text rather than in the void.
      *  - Constellation fades its links in together. Apophenia draws them one at
@@ -751,7 +790,7 @@
       const cols = o.pal || ['#b98cff', '#7effc4', '#ffffff'];
       let pts = (o.anchors || []).slice();
       // Nothing on screen to hang it off, or everything we got shares one
-      // baseline (a short reply, one line of transcript) — fall back to
+      // baseline (a short reply, one line of transcript) â fall back to
       // inventing some, which is thematically exactly right. Never draw the
       // flat set: a rule through the prose is worse than no effect at all.
       if (anchorsFlat(pts)) {
@@ -763,7 +802,7 @@
       }
       pts = pts.map((p) => ({ x: p.x, y: p.y, size: rand(1.6, 3.0) * o.scale, color: pick(cols) }));
 
-      // Random pairs across lines, distance ignored on purpose. No pair twice —
+      // Random pairs across lines, distance ignored on purpose. No pair twice â
       // the effect is a confident argument, and a confident argument doesn't
       // repeat itself. The rule lives in flourish.js so it can be tested.
       const pairs = planApopheniaPairs(pts);
@@ -802,7 +841,7 @@
     }
 
     // Fireflies: they wander, they twinkle, they take their time. The one
-    // effect that lingers — good for "lots of things happening at once".
+    // effect that lingers â good for "lots of things happening at once".
     _swarm(x, y, o) {
       const cols = o.pal || ['#7effc4', '#35f0a0', '#ffd27a', '#ffffff'];
       const n = Math.round(120 * o.scale);
@@ -889,10 +928,10 @@
       return segs;
     }
 
-    // Petals unfurling along a rose curve — organic, unlike everything else here.
+    // Petals unfurling along a rose curve â organic, unlike everything else here.
     _bloom(x, y, o) {
       const cols = o.pal || ['#ff5c7a', '#ffb3c4', '#ffd27a', '#7effc4'];
-      // r = R·|cos(k·θ)| draws 2k lobes, so k=2..4 gives a 4-, 6- or 8-petalled
+      // r = RÂ·|cos(kÂ·Î¸)| draws 2k lobes, so k=2..4 gives a 4-, 6- or 8-petalled
       // flower. More than that and the petals are too thin to read.
       const k = 2 + variant(3);
       const n = Math.round(440 * o.scale);
@@ -913,7 +952,7 @@
         });
       }
       // A small centre only. A growing ring here reads as a shockwave from a
-      // different effect entirely — the flower is the whole gesture.
+      // different effect entirely â the flower is the whole gesture.
       this.rings.push({ x, y, r: 2, life: 0, max: 700, grow: 0.25 * o.scale, color: _rgb(cols[0]), width: 1.5 });
     }
 
@@ -935,7 +974,7 @@
       }
     }
 
-    // A scanline sweeping the screen — reads as reading, checking, going through.
+    // A scanline sweeping the screen â reads as reading, checking, going through.
     _beam(o) {
       const c = o.pal ? _rgb(o.pal[0]) : '53,240,160';
       const vertical = chance(0.4);   // variant: down the screen, or across it
@@ -989,7 +1028,7 @@
     }
 
     // TV static. Noise is generated into a small offscreen buffer and blown up
-    // to full screen — 160x100 random pixels a frame is nothing, whereas
+    // to full screen â 160x100 random pixels a frame is nothing, whereas
     // per-pixel noise at 1120x720 is 800k writes and would drop the frame.
     _static(o) {
       if (!this._noiseBuf) {
@@ -997,7 +1036,7 @@
         this._noiseBuf.width = 160; this._noiseBuf.height = 100;
       }
       // Peak alpha is deliberately restrained. At 0.5 this covers the whole
-      // screen and the reader loses the sentence for half a second — "signal
+      // screen and the reader loses the sentence for half a second â "signal
       // lost" is the meaning, not an instruction to actually blind them.
       this.noise = { life: 0, max: rand(500, 900), alpha: Math.min(0.5, 0.3 * o.scale) };
     }
@@ -1022,7 +1061,7 @@
     }
 
     // PCB traces: Manhattan-routed paths that light up from the edges inward,
-    // with a pad at each end. Right angles are the whole point — it's the
+    // with a pad at each end. Right angles are the whole point â it's the
     // orthogonal cousin of frost's organic branching.
     _circuit(o) {
       const c = o.pal ? _rgb(o.pal[0]) : '53,240,160';
@@ -1042,7 +1081,7 @@
           segs.push({ x1: x, y1: y, x2: nx, y2: ny, at, w: rand(1, 2.2) });
           at += rand(0.05, 0.13);
           x = nx; y = ny;
-          // Turn 90°: swap which axis we travel on.
+          // Turn 90Â°: swap which axis we travel on.
           if (dx) { dy = chance(0.5) ? 1 : -1; dx = 0; } else { dx = chance(0.5) ? 1 : -1; dy = 0; }
         }
         pads.push({ x, y, at, r: rand(2.5, 5) });
@@ -1069,6 +1108,373 @@
         });
       }
       this.tracers = { heads, life: 0, max: rand(2200, 3200) };
+    }
+
+    // ---- ASCII scenes ----
+    //
+    // Ten effects, one array, one draw pass. Each is a machine talking to
+    // itself in monospace: the register `matrix` and `hexdump` gesture at, done
+    // literally. The content is planned in flourish.js (pure, seeded, tested);
+    // what lives here is geometry and paint.
+
+    // Cell metrics for a monospace grid at `px`. Measured, never assumed.
+    _cell(px) {
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.font = px + 'px ' + MONO;
+      const w = ctx.measureText('M').width;
+      ctx.restore();
+      return { w: w || px * 0.6, h: Math.round(px * 1.42), px };
+    }
+
+    /**
+     * Build a scene and push it.
+     *
+     * Returns null â and pushes nothing â if the planner that feeds it is
+     * missing. That's the one branch here that matters: this repo's signature
+     * bug is an effect quietly running its fallback and photographing well, so
+     * a scene with no content paints NOTHING rather than an empty pane with a
+     * nice glow on it. A missing scene is visible. A plausible one isn't.
+     */
+    _scene(kind, o, extra) {
+      if (Object.prototype.hasOwnProperty.call(ASCII_PLAN, kind) && !ASCII_PLAN[kind]) return null;
+      const s = Object.assign({
+        kind, life: 0, max: 3000,
+        color: o.pal ? _rgb(o.pal[0]) : '53,240,160',
+        accent: o.pal ? _rgb(o.pal[o.pal.length - 1]) : '255,45,111',
+        dim: '90,120,110',
+        scale: o.scale,
+      }, extra);
+      this.ascii.push(s);
+      return s;
+    }
+
+    // Place a pane of `cols`x`rows` cells near the caret without letting it
+    // hang off an edge. Panes are content, not decoration â half a hexdump is
+    // just noise.
+    _pane(x, y, cols, rows, cell) {
+      const w = cols * cell.w, h = rows * cell.h;
+      return {
+        x: Math.max(14, Math.min(this.w - w - 14, x - w * 0.5)),
+        y: Math.max(14, Math.min(this.h - h - 14, y - h * 0.5)),
+        w, h,
+      };
+    }
+
+    _fillText(ctx, str, x, y, rgb, alpha, cell) {
+      ctx.fillStyle = 'rgba(' + rgb + ',' + alpha + ')';
+      ctx.fillText(str, x, y);
+      void cell;
+    }
+
+    // A line-reveal pane: wardial, sniffer, trace, daemon, overflow all share
+    // this shape â lines arriving one at a time, scrolling once they overflow.
+    _linePane(kind, x, y, o, lines, opts) {
+      if (!lines || !lines.length) return null;
+      const cell = this._cell(Math.round(13 * o.scale));
+      const cols = lines.reduce((m, l) => Math.max(m, l.text.length), 0);
+      const rows = Math.min(opts.rows || 16, lines.length);
+      const box = this._pane(x, y, cols + 2, rows + 2, cell);
+      return this._scene(kind, o, {
+        lines, cell, box, rows,
+        per: opts.per || 110,
+        title: opts.title || '',
+        max: opts.max || (lines.length * (opts.per || 110) + 1500),
+      });
+    }
+
+    // The Gibson. A wireframe city pulled toward the viewer, its towers built
+    // out of block glyphs rather than lines â the movie's one image everybody
+    // remembers, and the reason this whole family exists.
+    _gibson(x, y, o) {
+      const towers = ASCII_PLAN.gibson && ASCII_PLAN.gibson();
+      if (!towers) return;
+      this._scene('gibson', o, {
+        towers,
+        cell: this._cell(13),
+        max: rand(3400, 4400),
+        speed: rand(0.0042, 0.0072) * o.scale,
+      });
+      void x; void y;
+    }
+
+    _wardial(x, y, o) {
+      this._linePane('wardial', x, y, o, ASCII_PLAN.wardial && ASCII_PLAN.wardial(), {
+        per: 95, rows: 15, title: 'AUTODIAL',
+      });
+    }
+
+    _sniffer(x, y, o) {
+      this._linePane('sniffer', x, y, o, ASCII_PLAN.sniffer && ASCII_PLAN.sniffer(), {
+        per: 150, rows: 10, title: 'tcpdump -X -i eth0',
+      });
+    }
+
+    _trace(x, y, o) {
+      this._linePane('trace', x, y, o, ASCII_PLAN.trace && ASCII_PLAN.trace(), {
+        per: 230, rows: 12, title: 'traceroute gibson.ellingson.com',
+      });
+    }
+
+    _daemon(x, y, o) {
+      this._linePane('daemon', x, y, o, ASCII_PLAN.daemon && ASCII_PLAN.daemon(), {
+        per: 130, rows: 18, title: 'pstree',
+      });
+    }
+
+    // The smash. The frame is drawn whole and then flooded from the buffer up,
+    // one row at a time, until the saved return address is 0x41414141 â the
+    // one moment in this set where the picture and the point are the same
+    // thing.
+    _overflow(x, y, o) {
+      const plan = ASCII_PLAN.overflow && ASCII_PLAN.overflow();
+      if (!plan) return;
+      const cell = this._cell(Math.round(13 * o.scale));
+      const box = this._pane(x, y, 40, plan.rows.length + 5, cell);
+      this._scene('overflow', o, {
+        plan, cell, box, per: 260,
+        max: plan.rows.length * 260 + 2200,
+      });
+    }
+
+    _portscan(x, y, o) {
+      const ports = ASCII_PLAN.portscan && ASCII_PLAN.portscan();
+      if (!ports) return;
+      const cell = this._cell(Math.round(12 * o.scale));
+      const perRow = 4;
+      const rows = Math.ceil(ports.length / perRow);
+      const box = this._pane(x, y, perRow * 21, rows + 2, cell);
+      this._scene('portscan', o, {
+        ports, cell, box, perRow, per: 70,
+        max: ports.length * 70 + 2000,
+      });
+    }
+
+    _crack(x, y, o) {
+      const plan = ASCII_PLAN.crack && ASCII_PLAN.crack();
+      if (!plan) return;
+      this._scene('crack', o, {
+        plan, cell: this._cell(Math.round(30 * o.scale)),
+        cx: this.w / 2, cy: y,
+        max: plan.doneAt + 1400,
+      });
+      void x;
+    }
+
+    // Big block letters. `bannerRows` rasterises the phrase; each ink cell
+    // lights on its own schedule so the words assemble left to right.
+    _banner(x, y, o) {
+      if (!A.bannerRows || !A.BANNER_WORDS) return;
+      const text = pick(A.BANNER_WORDS);
+      const rows = A.bannerRows(text);
+      if (!rows || !rows.length) return;
+      // Cell height is the font size here, not the 1.42 line-height _cell()
+      // gives text: a banner's rows have to ABUT. At normal leading the blocks
+      // sit in stripes with the background showing through and the letters read
+      // as a dot grid rather than as strokes.
+      const px = Math.max(7, Math.round(this.w / (rows[0].length * 1.15)));
+      const cell = this._cell(px);
+      cell.h = px;
+      const max = rand(2900, 3500);
+      this._scene('banner', o, {
+        rows, text, cell,
+        x0: (this.w - rows[0].length * cell.w) / 2,
+        y0: y - (rows.length * cell.h) / 2,
+        // Derived from the lifetime, not a constant. At a fixed 22ms per column
+        // a long phrase reveals for as long as it lives: HACK THE PLANET was 90
+        // columns, so it finished assembling at ~68% of its life and started
+        // fading almost immediately — the bloom lesson, which this file already
+        // records and which I walked straight into anyway. A short phrase and a
+        // long one now both finish at a third of the way through and hold.
+        per: (max * 0.32) / rows[0].length,
+        max,
+      });
+      void x;
+    }
+
+    // The skull rezzes in scattered, not in reading order: it's an image, and
+    // an image that assembles left-to-right reads as text.
+    _skull(x, y, o) {
+      if (!A.SKULL || !A.SKULL.length) return;
+      const art = A.SKULL;
+      const cell = this._cell(Math.round(17 * o.scale));
+      const cells = [];
+      for (let r = 0; r < art.length; r++) {
+        for (let c = 0; c < art[r].length; c++) {
+          const ch = art[r][c];
+          if (ch === ' ') continue;
+          cells.push({ ch, r, c, at: rand(0, 900) });
+        }
+      }
+      if (!cells.length) return;
+      this._scene('skull', o, {
+        cells, cell,
+        x0: this.w / 2 - (art[0].length * cell.w) / 2,
+        y0: y - (art.length * cell.h) / 2,
+        max: rand(2800, 3400),
+      });
+      void x;
+    }
+
+    _drawAscii(ctx, S) {
+      const t = S.life / S.max;
+      // Hold, then go. An effect that eases across its whole lifetime finishes
+      // forming once it's already two-thirds faded â the bloom lesson.
+      const fade = t > 0.8 ? 1 - (t - 0.8) / 0.2 : 1;
+      if (fade <= 0) return;
+      ctx.save();
+      ctx.textBaseline = 'top';
+
+      if (S.kind === 'gibson') {
+        // A plain pinhole projection: screen = focal * ground / z. The horizon
+        // is where z = infinity, so it's just cy, and the ground plane falls
+        // away below it as z shrinks.
+        //
+        // The first version divided the ground offset by a constant as well as
+        // by z, which collapsed 26 units of depth into about 100px of screen â
+        // every tower landed in one thin band on the horizon and the city read
+        // as a smear of specks. It painted, on-screen, in its own glyphs, and
+        // the probe called it green. Only looking at it found this.
+        const cx = this.w / 2, cy = this.h * 0.42;
+        const FOCAL = this.w * 0.42;
+        const CAM_H = 2.0;     // ground units the eye rides above the plane
+        const STOREY = 0.55;   // ground units per floor
+        const CELLW = 0.38;    // ground units per window column
+        // Far towers first: the near ones have to occlude them.
+        const order = S.towers.slice().sort((a, b) => b.z - a.z);
+        for (const tw of order) {
+          if (tw.z <= 0.6) continue;
+          const k = FOCAL / tw.z;
+          const px = cx + tw.gx * k;
+          const cw = CELLW * k, chh = STOREY * k;
+          if (px < -this.w || px > this.w * 2) continue;
+          const base = cy + CAM_H * k;
+          const top = base - tw.rows * chh;
+          if (base < 0 || top > this.h) continue;
+          // Atmospheric falloff. Tuned so the mid-distance is still a city
+          // rather than a rumour: at 1.6/z the whole middle of the plane sat
+          // under 20% alpha and only the two nearest towers read.
+          const depth = Math.max(0.1, Math.min(1, 5 / tw.z));
+          const a = fade * depth;
+          // The wireframe: the Gibson was drawn in lines before it was ever
+          // drawn in blocks.
+          ctx.strokeStyle = 'rgba(' + (tw.lit ? S.accent : S.color) + ',' + a * 0.7 + ')';
+          ctx.lineWidth = Math.max(0.5, k * 0.006);
+          ctx.strokeRect(px, top, cw * tw.cols, base - top);
+          ctx.font = Math.max(3, chh * 0.92) + 'px ' + MONO;
+          for (let r = 0; r < tw.rows; r++) {
+            for (let c = 0; c < tw.cols; c++) {
+              const gx = px + c * cw, gy = base - (r + 1) * chh;
+              // Cull per glyph, not just per tower. A near tower is mostly
+              // off-screen by design â you're flying through the city, not
+              // looking at a postcard of it â but the storeys above the top
+              // edge still cost a fillText each. The probe measured 1883 of
+              // these landing outside the viewport in a 1.4s sample, against a
+              // documented frame knee this engine is already close to.
+              if (gx < -cw || gx > this.w || gy < -chh || gy > this.h) continue;
+              const lit = tw.lit && ((r * 7 + c * 3 + (tw.rows | 0)) % 3 === 0);
+              this._fillText(ctx, lit ? '#' : '=', gx, gy,
+                lit ? S.accent : S.color, a * (lit ? 0.95 : 0.4));
+            }
+          }
+        }
+      } else if (S.kind === 'crack') {
+        const P = S.plan, C = S.cell;
+        const w = P.cells.length * C.w;
+        const x0 = S.cx - w / 2;
+        ctx.font = C.px + 'px ' + MONO;
+        this._fillText(ctx, 'BRUTE FORCE', x0, S.cy - C.h * 1.5, S.dim, fade * 0.6);
+        for (let i = 0; i < P.cells.length; i++) {
+          const cell = P.cells[i];
+          const locked = S.life >= cell.lockAt;
+          const ch = locked ? cell.ch : CRACK_CHARSET[(Math.random() * CRACK_CHARSET.length) | 0];
+          const a = fade * (locked ? 1 : 0.45);
+          this._fillText(ctx, ch, x0 + i * C.w, S.cy, locked ? S.color : S.dim, a);
+          if (locked) {
+            const sprite = glowSprite('rgb(' + S.color + ')');
+            const d = C.px * 1.6;
+            ctx.globalAlpha = fade * 0.5;
+            ctx.drawImage(sprite, x0 + i * C.w - d * 0.2, S.cy + C.px * 0.4 - d / 2, d, d);
+            ctx.globalAlpha = 1;
+          }
+        }
+        if (S.life >= P.doneAt) {
+          this._fillText(ctx, '** ACCESS GRANTED **', x0, S.cy + C.h * 1.4, S.accent, fade);
+        }
+      } else if (S.kind === 'banner') {
+        const C = S.cell;
+        ctx.font = C.px + 'px ' + MONO;
+        for (let r = 0; r < S.rows.length; r++) {
+          for (let c = 0; c < S.rows[r].length; c++) {
+            if (S.rows[r][c] !== '#') continue;
+            if (S.life < c * S.per) continue;
+            const age = S.life - c * S.per;
+            const pop = Math.min(1, age / 180);
+            this._fillText(ctx, '█', S.x0 + c * C.w, S.y0 + r * C.h,
+              r < 2 ? S.accent : S.color, fade * (0.35 + pop * 0.65));
+          }
+        }
+      } else if (S.kind === 'skull') {
+        const C = S.cell;
+        ctx.font = C.px + 'px ' + MONO;
+        for (const cell of S.cells) {
+          if (S.life < cell.at) continue;
+          const pop = Math.min(1, (S.life - cell.at) / 260);
+          this._fillText(ctx, cell.ch, S.x0 + cell.c * C.w, S.y0 + cell.r * C.h,
+            S.color, fade * pop * 0.95);
+        }
+      } else if (S.kind === 'portscan') {
+        const C = S.cell;
+        ctx.font = C.px + 'px ' + MONO;
+        this._fillText(ctx, 'PORT     STATE     SERVICE', S.box.x, S.box.y - C.h, S.dim, fade * 0.7);
+        for (let i = 0; i < S.ports.length; i++) {
+          if (S.life < i * S.per) continue;
+          const p = S.ports[i];
+          const col = i % S.perRow, row = (i / S.perRow) | 0;
+          const open = p.state === 'open';
+          const txt = (p.port + '/tcp').padEnd(11) + p.state.padEnd(9) + p.svc;
+          this._fillText(ctx, txt, S.box.x + col * C.w * 21, S.box.y + row * C.h,
+            open ? S.color : S.dim, fade * (open ? 1 : 0.42));
+        }
+      } else if (S.kind === 'overflow') {
+        const C = S.cell, P = S.plan;
+        ctx.font = C.px + 'px ' + MONO;
+        const filled = Math.min(P.flood, Math.floor(S.life / S.per));
+        const bar = '+' + '-'.repeat(34) + '+';
+        this._fillText(ctx, bar, S.box.x, S.box.y, S.dim, fade * 0.7);
+        for (let i = 0; i < P.rows.length; i++) {
+          const r = P.rows[i];
+          // Filled bottom-up: the last row in the list floods first.
+          const smashed = filled > (P.rows.length - 1 - i);
+          const val = smashed ? P.smashed : r.val;
+          const txt = '| ' + r.label + ' ' + ('0x' + (r.addr >>> 0).toString(16)) + '  ' + val + ' |';
+          const isRet = r.kind === 'ret';
+          this._fillText(ctx, txt, S.box.x, S.box.y + (i + 1) * C.h,
+            smashed ? (isRet ? S.accent : S.color) : S.dim,
+            fade * (smashed ? 1 : 0.5));
+        }
+        this._fillText(ctx, bar, S.box.x, S.box.y + (P.rows.length + 1) * C.h, S.dim, fade * 0.7);
+        if (filled >= P.flood) {
+          this._fillText(ctx, 'eip = ' + P.smashed + '  -> ' + 'AAAA'.repeat(2),
+            S.box.x, S.box.y + (P.rows.length + 2.4) * C.h, S.accent, fade);
+        }
+      } else {
+        // The line panes: wardial, sniffer, trace, daemon.
+        const C = S.cell;
+        ctx.font = C.px + 'px ' + MONO;
+        const shown = Math.min(S.lines.length, Math.floor(S.life / S.per) + 1);
+        const first = Math.max(0, shown - S.rows);
+        if (S.title) this._fillText(ctx, '$ ' + S.title, S.box.x, S.box.y - C.h, S.dim, fade * 0.75);
+        for (let i = first; i < shown; i++) {
+          const L = S.lines[i];
+          const y = S.box.y + (i - first) * C.h;
+          const fresh = S.life - i * S.per < 160;
+          this._fillText(ctx, L.text, S.box.x, y,
+            L.hit ? S.accent : S.color,
+            fade * (L.hit ? 1 : fresh ? 0.95 : 0.55));
+        }
+      }
+      ctx.restore();
     }
 
     // ---- full-screen (DOM-driven) effects ----
@@ -1102,7 +1508,7 @@
     _busy() {
       return this.particles.length || this.rings.length || this.bolts.length
         || this.sheets.length || this.sweeps.length || this.links || this.webs
-        || this.frost || this.matrix
+        || this.frost || this.matrix || this.ascii.length
         || this.noise || this.grid || this.traces || this.tracers;
     }
 
@@ -1137,7 +1543,7 @@
           // Last chance to hand a flier's character back to the DOM. It has to
           // happen here rather than at t>=1 in the fly branch below, because a
           // particle is dropped on the frame its life runs out and never gets
-          // that update — a flier would vanish one frame short of its target
+          // that update â a flier would vanish one frame short of its target
           // and the character it was carrying would never be revealed.
           if (p.onLand && !p.landed) { p.landed = true; p.onLand(); }
           continue;
@@ -1146,7 +1552,7 @@
         if (p.mode === 'fly') {
           // Quadratic bezier, eased both ends: it leaves reluctantly and
           // settles rather than slamming. Position is computed from t rather
-          // than integrated, so the landing is exact — a velocity-driven flier
+          // than integrated, so the landing is exact â a velocity-driven flier
           // misses its target by whatever the last frame's dt happened to be,
           // and "exactly on the character" is the entire illusion.
           const t = Math.min(1, (p.life - (p.delay || 0)) / p.max);
@@ -1161,14 +1567,14 @@
           p.x = p.cx + Math.cos(p.ang) * p.rad;
           p.y = p.cy + Math.sin(p.ang) * p.rad;
         } else if (p.mode === 'rose') {
-          // r = R·|cos(k·θ)| traces a 2k-petalled rose. Each particle keeps its
-          // own θ and rides out along the petal it sits under as the bloom
+          // r = RÂ·|cos(kÂ·Î¸)| traces a 2k-petalled rose. Each particle keeps its
+          // own Î¸ and rides out along the petal it sits under as the bloom
           // opens; rfrac is how deep under the rim it sits.
           const t = (p.life - (p.delay || 0)) / p.max;
           const th = p.ang + p.spin * p.life;
           // Open fast, then hold. A particle's alpha is 1-t, so an `open` that
           // eases across the whole life means the flower only finishes forming
-          // once it's already two-thirds faded — fully shaped and nearly
+          // once it's already two-thirds faded â fully shaped and nearly
           // invisible at the same instant. Opening by t=0.3 lets it be a flower
           // while it can still be seen.
           const open = Math.sin(Math.min(1, t * 3.4) * Math.PI * 0.5);
@@ -1209,7 +1615,7 @@
       for (const b of this.bolts) {
         b.life += dt;
         // The return stroke: the tip has reached the word. Everything the
-        // strike does — the flash, the sparks, the fire — hangs off this one
+        // strike does â the flash, the sparks, the fire â hangs off this one
         // moment rather than off the directive firing, because the directive
         // fires while the leader is still somewhere up in the dark.
         if (!b.struck && b.life - (b.delay || 0) >= b.grow) {
@@ -1256,6 +1662,24 @@
         if (this.matrix.life >= this.matrix.max) this.matrix = null;
       }
 
+      // Every ASCII scene ages the same way and reaps itself. Splicing from the
+      // back so a scene expiring can't skip the one behind it.
+      for (let i = this.ascii.length - 1; i >= 0; i--) {
+        const S = this.ascii[i];
+        S.life += dt;
+        // The only scene with motion in it: the city is flown through, the
+        // rest are typed. Towers recycle to the back rather than dying, so a
+        // long gibson can't quietly run out of city and hold on an empty
+        // ground plane â the same reason tracer wraps instead of expiring.
+        if (S.kind === 'gibson') {
+          for (const tw of S.towers) {
+            tw.z -= S.speed * dt;
+            if (tw.z <= 0.5) { tw.z += 26; tw.gx = rand(-9, 9); }
+          }
+        }
+        if (S.life >= S.max) this.ascii.splice(i, 1);
+      }
+
       if (this.noise) { this.noise.life += dt; if (this.noise.life >= this.noise.max) this.noise = null; }
       if (this.grid) { this.grid.life += dt; if (this.grid.life >= this.grid.max) this.grid = null; }
       if (this.traces) { this.traces.life += dt; if (this.traces.life >= this.traces.max) this.traces = null; }
@@ -1285,7 +1709,7 @@
       ctx.clearRect(0, 0, this.w, this.h);
       if (this.under) this.under.clearRect(0, 0, this.w, this.h);
 
-      // Aurora sits furthest back — it's a backdrop, not a burst.
+      // Aurora sits furthest back â it's a backdrop, not a burst.
       if (this.sheets.length) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -1310,7 +1734,7 @@
         ctx.restore();
       }
 
-      // Synthwave grid — behind everything, like the aurora.
+      // Synthwave grid â behind everything, like the aurora.
       if (this.grid) {
         const G = this.grid;
         const t = G.life / G.max;
@@ -1327,7 +1751,7 @@
           ctx.lineTo(cx + i * 150, this.h); ctx.stroke();
         }
         // Horizontals: squaring the row fraction is what gives the ground its
-        // perspective — rows bunch at the horizon and stretch toward you.
+        // perspective â rows bunch at the horizon and stretch toward you.
         const scroll = (G.life * G.speed) % 1;
         for (let k = 0; k < G.rows; k++) {
           const p = ((k + scroll) / G.rows);
@@ -1411,6 +1835,11 @@
           }
         }
       }
+
+      // The ASCII register. After matrix (which is a backdrop) and before the
+      // particles, which stay on top of everything: a scene is something the
+      // machine is saying, and a spark thrown over it still reads as a spark.
+      for (const S of this.ascii) this._drawAscii(ctx, S);
 
       // Frost: reveal branch segments as the effect ages, then fade the lot.
       if (this.frost) {
@@ -1518,7 +1947,7 @@
           const a = W.pts[pr.i], b = W.pts[pr.j];
           const grow = Math.min(1, age / 260);
           // Distance is not evidence here, so unlike constellation the alpha
-          // doesn't fall off with length — a line across the whole screen is
+          // doesn't fall off with length â a line across the whole screen is
           // asserted exactly as confidently as one between neighbours.
           wc.strokeStyle = `rgba(${W.color},${(0.5 * fade).toFixed(3)})`;
           wc.beginPath();
@@ -1542,7 +1971,7 @@
         const age = b.life - (b.delay || 0);
         const c = b.color || '190,235,255';
 
-        // Two acts. Growing: the leader is dim, flickery and partial — it's
+        // Two acts. Growing: the leader is dim, flickery and partial â it's
         // feeling its way down and hasn't connected to anything. Struck: the
         // return stroke lights the finished channel hard and lets it decay.
         const growing = age < b.grow;
@@ -1572,7 +2001,7 @@
           ctx.lineWidth = pass.w;
           this._strokeTo(ctx, b.main, reveal);
           // A fork stays dark until the tip has actually passed the point it
-          // leaves from, and then runs on its own clock — so the channel opens
+          // leaves from, and then runs on its own clock â so the channel opens
           // out as it descends instead of arriving pre-branched.
           for (const fk of b.forks) {
             if (reveal < fk.at) continue;
@@ -1661,7 +2090,7 @@
       }
       ctx.restore();
 
-      // TV static goes over everything — it's interference, not a light source.
+      // TV static goes over everything â it's interference, not a light source.
       if (this.noise) {
         const N = this.noise;
         const a = Math.sin(Math.min(1, N.life / N.max) * Math.PI) * N.alpha;
@@ -1672,7 +2101,7 @@
         for (let i = 0; i < d.length; i += 4) {
           const v = (Math.random() * 255) | 0;
           d[i] = d[i + 1] = d[i + 2] = v;
-          // Punch holes so it reads as noise rather than fog — and so the text
+          // Punch holes so it reads as noise rather than fog â and so the text
           // underneath stays partly legible through the gaps.
           d[i + 3] = v > 140 ? 255 : 0;
         }
@@ -1695,7 +2124,7 @@
         ctx.fillStyle = p.color;
         ctx.translate(p.x, p.y); ctx.rotate(p.rot || 0);
         if (p.shape === 'shard') {
-          // An irregular sliver — glass, not a tile.
+          // An irregular sliver â glass, not a tile.
           ctx.beginPath();
           ctx.moveTo(0, -p.size / 2);
           for (let i = 1; i < p.verts; i++) {

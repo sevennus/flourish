@@ -113,6 +113,42 @@ and must be closed; **consuming spans** destroy the text they wrap.
 | `{{fx:tracer}}` | paths, routing, following a thread |
 | `{{fx:dilate}}` | *paints nothing* — the terminal holds still a beat |
 
+### ASCII scenes
+
+Ten of them, and they are the loud end of the cyberpunk register: monospace text
+painted over the terminal, a machine talking to itself, in the visual language of
+a 1995 hacker movie. Unlike everything else here they are **not seasoning** —
+each takes several seconds and says one specific thing, so the prompt asks for at
+most one per reply.
+
+| Scene | Reads as |
+|---|---|
+| `{{fx:gibson}}` | a wireframe ASCII city rushing past — a big system you're going into |
+| `{{fx:wardial}}` | numbers dialled, almost all `NO CARRIER`, one `CONNECT`s — a brute search that hits |
+| `{{fx:crack}}` | characters lock left-to-right into a password — an answer resolving a place at a time |
+| `{{fx:banner}}` | huge ASCII block letters — a title card, a war cry |
+| `{{fx:sniffer}}` | a hexdump pane with a credential in it — raw bytes, reading the wire |
+| `{{fx:trace}}` | traceroute hops with latency bars — following something to its source |
+| `{{fx:daemon}}` | a process tree branching out — what spawned what |
+| `{{fx:portscan}}` | a grid of ports, a few `open` — probing a surface |
+| `{{fx:skull}}` | an ASCII skull rezzes in — a kill, a dead process, a warning |
+| `{{fx:overflow}}` | a stack frame floods with `AAAA` until `ret` is `0x41414141` — a boundary that didn't hold |
+
+Two structural decisions worth keeping:
+
+- **They share one array.** `this.ascii` holds every scene, so `_busy`, `_update`,
+  `_draw` and `fx-shots`' `reset()` each needed one line rather than ten. That
+  fourth list is hand-maintained and the Notes below record what forgetting an
+  entry costs; ten new `this.<name>` fields would have been ten chances to pay
+  it. An eleventh scene needs a name in `ASCII_EFFECTS` and a `prompt.js` line —
+  `fire()` dispatches the family off that set, so there is no `case` to forget.
+- **Content is planned in `flourish.js`, drawn in `effects.js`.** Every scene's
+  facts — the hexdump's bytes, the traceroute's latencies, the stack's addresses,
+  the banner's raster — come out of a pure seeded function, because `npm test`
+  covers pure modules and a scene generated inside a canvas draw call can only be
+  checked by looking at a picture. See `tools/ascii-probe.js` for why that isn't
+  good enough here.
+
 | Text span | Reads as |
 |---|---|
 | `{{fx:glow}}…{{/fx:glow}}` | a key result |
@@ -481,12 +517,37 @@ Pure-logic unit tests (parser, auto-highlighter, stream translator, command
 builder, and the vocabulary-vs-engine/CSS/prompt/tool-map seams):
 
 ```bash
-npm test           # node --test — 88 tests, no browser/VM needed
+npm test           # node --test — 206 tests, no browser/VM needed
 ```
 
 **These do not touch the renderer.** They passed 88/88 while the app rendered
 exactly one word of every reply (see *Smoke test* below). Green here means the
 parser and bridge are sound; it says nothing about whether the app boots.
+
+### `ascii-probe` — do the ten scenes paint what they plan?
+
+The same gap, in its sharpest form. All ten ASCII scenes are planned by pure
+functions with ~40 tests over them, and every one of those tests would stay green
+if `_drawAscii` returned on its first line.
+
+```bash
+xvfb-run -a ./node_modules/.bin/electron tools/ascii-probe.js --no-sandbox
+```
+
+It wraps the real 2D context's `fillText`/`strokeRect` **before** any effect
+fires and counts what actually lands — an oracle that never asks a scene about
+itself. Per scene: did it plan content, did it really paint, did the draws land
+*inside* the viewport, are the strings on the canvas the planner's **own**, and
+did it reap itself. Sabotage-verified in both directions; it caught a `crack`
+that spun 2,521 glyphs and never locked (`wanted "CRASHOVERRIDE", got
+"RHXC!54H5D3MB"`) and a `gibson` making 1,883 draw calls off the edge of the
+screen. Both photograph fine.
+
+Two traps it walked into first, which is the point of writing it down: sampling
+the tap after a `sleep` gathers *however many frames fit* (`banner` reported at
+exactly 7× its ink and looked broken), so frame boundaries are taken by wrapping
+`_draw`; and line panes reveal on a timer, so sampling mid-life reports `16/17`
+on a scene that is working and simply hasn't finished talking.
 
 ### Smoke test — does the app actually run?
 
@@ -636,6 +697,16 @@ tools/fx-bench.js  particle-budget benchmark (alternate Electron entry).
   raise the *per-effect* counts and re-run the bench. Ignore the first rung of a
   cold run — window/GL warm-up makes it lie (it once reported 4000 as slower
   than 8000).
+- **The ASCII scenes are `fillText`-bound, not particle-bound.** They push almost
+  no particles and don't register on `fx-bench`, which counts particles. The cost
+  is draw calls: `gibson` is the heaviest thing in the engine at **~840
+  `fillText` per frame** and measures **60.4 fps** under software GL, against
+  `nova`'s 93.3 — at budget, with nothing spare. Culling per *glyph* rather than
+  per tower is what bought that: without it the same scene makes 84,198 draws in
+  a 2s sample, 3,175 of them off the edge of the screen, for exactly the same
+  picture. If a new scene draws a full-screen grid of cells, cull it against the
+  viewport and re-run `tools/ascii-probe.js` — its `off-screen` column is the
+  number that matters.
 - **Particle glow is a cached sprite, not `ctx.shadowBlur`.** Chromium
   rasterizes canvas2d shadows on the CPU per draw call: with `shadowBlur`,
   `{{fx:nova}}`'s 180 glowing particles measured **2 frames in 353ms (~6fps)**,
@@ -671,8 +742,9 @@ tools/fx-bench.js  particle-budget benchmark (alternate Electron entry).
   particle life stops advancing, effects never expire, and each captured frame
   is a pile-up of the previous few. Its `reset()` must clear *every* array the
   engine animates (`particles` `rings` `bolts` `sheets` `sweeps` `links` `frost`
-  `matrix`) — miss one when adding an effect and that effect quietly stacks up
-  across every later shot.
+  `matrix` `ascii`) — miss one when adding an effect and that effect quietly
+  stacks up across every later shot. `ascii` is one entry for all ten scenes on
+  purpose; that's why they share an array.
 - **An effect must be fully formed while it can still be seen.** A particle's
   alpha is `1 - life/max`, so any effect that eases its shape across the whole
   lifetime finishes forming at the moment it's already two-thirds faded.

@@ -1,0 +1,199 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish — ten ASCII scenes, and three things a green suite couldn't see</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  h3{font-size:14px;color:#9fd5e6;margin-top:22px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  ul li{margin:5px 0}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+  .back{display:inline-block;margin-bottom:18px;color:#94a3b8;text-decoration:none;font-size:13px}
+  .back:hover{color:#e0b54a}
+</style></head><body>
+
+<a class="back" href="index.html">&larr; back to writeups</a>
+
+<h1>Ten ASCII scenes, and three things a green suite couldn't see</h1>
+<p class="meta">Branch <code>main</code> · flourish.js, effects.js, prompt.js, tools/ascii-probe.js, tools/fx-shots.js, test/ascii.test.js · 2026-07-16</p>
+
+<h2>The ask</h2>
+<blockquote>"come up with 10 more hackery-type tech effects. take cues from 'hackers' movie, use ascii art" &mdash; "and implement them"</blockquote>
+
+<p>Ten new point effects: <code>gibson</code>, <code>wardial</code>, <code>crack</code>, <code>banner</code>,
+<code>sniffer</code>, <code>trace</code>, <code>daemon</code>, <code>portscan</code>, <code>skull</code>,
+<code>overflow</code>. This writeup is not really about building them. It's about the fact that
+<b>206 passing tests, ten correct planners and ten beautiful screenshots agreed the work was done,
+and three separate things were still wrong</b> &mdash; one in the feature, two in the tools built to
+check the feature.</p>
+
+<h2>Two structural decisions, made to dodge known traps</h2>
+
+<p><b>One array, not ten fields.</b> Every other full-screen effect owns a <code>this.&lt;name&gt;</code>
+that must be remembered in four places: <code>_busy</code>, <code>_update</code>, <code>_draw</code>, and
+<code>fx-shots</code>' hand-maintained <code>reset()</code>. The README already records the cost of missing
+the fourth &mdash; "that effect quietly stacks up across every later shot". Ten new fields would have been
+ten chances to pay it. All ten scenes live in <code>this.ascii</code>: one line in each place, and an
+eleventh scene costs no wiring at all. <code>fire()</code> dispatches the family off the
+<code>ASCII_EFFECTS</code> set, so there is no <code>case</code> to forget either.</p>
+
+<p><b>Planned pure, drawn impure.</b> Every fact a scene contains &mdash; the hexdump's bytes, the
+traceroute's latencies, the stack's addresses, the banner's raster &mdash; comes out of a seeded pure
+function in <code>flourish.js</code>. <code>npm test</code> covers pure modules; a scene generated inside a
+canvas draw call can only ever be checked by looking at a picture, and this repo has already shipped
+that bug twice with pictures attached.</p>
+
+<h2>What the unit tests caught</h2>
+
+<p>~40 tests, every scene at seven fixed seeds. They're written against invariants that would still be
+violated in a frame that looked perfect:</p>
+
+<ul>
+<li>the hexdump's hex column must decode to its own ASCII gutter (they're generated from one array of bytes, so they cannot disagree &mdash; unless they do)</li>
+<li>traceroute latency must increase, hop over hop &mdash; cumulative distance is the entire meaning of the bars</li>
+<li>the wardial must connect, and only on the last line &mdash; a run that never connects is a number generator</li>
+<li>the overflow must reach the return address &mdash; an overflow that stops inside the buffer is a bounds check working</li>
+<li>2600 and 31337 must be open &mdash; left to the rng they'd be dark in most runs, and they are the entire joke</li>
+</ul>
+
+<p>One of these caught a <b>real bug on the first run</b>. <code>sniffer</code> flagged its credential
+lines by testing each 16-byte row's own gutter &mdash; but a 16-byte window splits
+<code>Authorization</code> about as often as not, so on two of three payloads <b>nothing was flagged at
+all</b> and the scene drew perfectly with the credential in the same colour as everything else. Marks are
+now matched against the whole payload and intersected with each row.</p>
+
+<h3>Then the tests were sabotaged, because green proves nothing here</h3>
+
+<p>Eight deliberate breakages, one at a time:</p>
+
+<table>
+<tr><th>Sabotage</th><th>Caught?</th></tr>
+<tr><td>sniffer credential marking gutted</td><td class="good">yes</td></tr>
+<tr><td>wardial never CONNECTs</td><td class="good">yes</td></tr>
+<tr><td>crack locks backwards</td><td class="good">yes</td></tr>
+<tr><td>2600/31337 left to the rng</td><td class="good">yes</td></tr>
+<tr><td>overflow stops inside the buffer</td><td class="good">yes</td></tr>
+<tr><td>ascii dispatch cut out of <code>fire()</code></td><td class="good">yes</td></tr>
+<tr><td><code>fx-shots</code> reset line forgotten</td><td class="good">yes</td></tr>
+<tr><td><b>banner glyph 'A' blanked entirely</b></td><td class="bad">NO &mdash; 0 failures</td></tr>
+</table>
+
+<p>The last one is why sabotage is worth the time. The per-phrase ink threshold passed happily:
+<code>HACK THE PLANET</code> has plenty of ink left without its As, and on screen a banner missing one
+letter is a well-formed rectangle of the right size in the right place. There is no picture that gives
+it away. It's now asserted per glyph, and the sabotage fails.</p>
+
+<h2>The probe: what 206 green tests still couldn't see</h2>
+
+<p>Every one of those tests calls a planner. <code>_drawAscii</code> could have returned on its first
+line and all 206 would have stayed green. So <code>tools/ascii-probe.js</code> wraps the real 2D
+context's <code>fillText</code>/<code>strokeRect</code> <b>before any effect fires</b> and counts what
+actually lands &mdash; an oracle that never asks a scene about itself.</p>
+
+<p>It found the feature bug the tests structurally could not:</p>
+
+<pre>scene       planned  painted  boxes  off-screen  own content   reaped
+gibson      36       72489    2988   <span class="bad">1883</span>        (n/a)         yes
+crack       13       1190     0      0           <span class="bad">0/1</span>           yes</pre>
+
+<p><code>gibson</code> was making 1,883 draw calls a sample off the edge of the screen &mdash; culled per
+tower, but not per glyph. Culling per glyph took it from 84,198 draws (3,175 invisible) to 53,146 (zero),
+for an identical picture, on the heaviest effect in the engine.</p>
+
+<h3>And then the probe itself was wrong, twice</h3>
+
+<p><code>crack</code>'s <code>0/1</code> was not a bug. <code>crack</code> draws <i>one character per
+<code>fillText</code></i>, so an oracle searching for the whole target string could never match. The probe
+now takes a single frame's worth of single-glyph draws, in order. Same for <code>banner</code>, which
+reported exactly <b>7&times;</b> its expected ink &mdash; sleeping 120ms and reading the tap gathers however
+many frames happen to fit. Frame boundaries are now taken by wrapping <code>_draw</code>.</p>
+
+<p>Sabotaged back the other way, the fixed oracle bites hard:</p>
+
+<pre>=== crack never locks (const locked = false) ===
+crack       8        1329     0      0           <span class="bad">NO</span>            yes
+      wanted <span class="good">"ACIDBURN"</span> got <span class="bad">"SY^GHTZ^"</span>
+BROKEN SCENES: 1
+
+=== _drawAscii returns immediately ===
+actually painted to the canvas:  <span class="bad">0/10</span>
+BROKEN SCENES: 10</pre>
+
+<p>2,521 glyphs of perfectly busy nothing. That is the shape of every bug this repo has shipped.</p>
+
+<h2>The third thing: the harness lied about the harness</h2>
+
+<p>With the cull in place <code>gibson</code> still reported ~400 off-screen draws, varying run to run.
+Firing <code>gibson</code> alone reported zero. Two red herrings fell out before the real one:</p>
+
+<ul>
+<li><b>The per-scene isolation was fake.</b> <code>getContext('2d')</code> returns the <i>same</i> context
+object every call, so a fresh engine per scene shares one context with the renderer's own and with every
+tap installed before it. The app's ambient effects were being counted as the scene's. Draws are now
+attributed to the engine that made them.</li>
+<li><b>A fixed &plusmn;50px threshold is only a proxy for "invisible".</b> It holds while glyphs are small;
+a 100px-wide gibson window at <code>x = -80</code> is half on screen and entirely intentional. So the check
+was made to measure against the glyph's own size, read off <code>ctx.font</code>.</li>
+</ul>
+
+<p>Neither fixed it. The samples did:</p>
+
+<pre>RAW FONT: [{"x":831,"y":-33,<span class="bad">"sz":13</span>,"font":<span class="good">"126.025px ui-monospace, ..."</span>}]</pre>
+
+<p>The real font was <b>126px</b> and the probe read <b>13</b> &mdash; its fallback, on every single call.
+The size regex lives inside a template literal on its way through <code>executeJavaScript</code>, where
+<code>\d</code> is not a valid escape and <b>degrades silently to a bare <code>d</code></b>. The pattern
+became <code>(d+(?:.d+)?)px</code>, matched nothing, and fell back to 13 forever &mdash; making the
+threshold ~10&times; too tight and inventing ~400 phantom misses on a scene that was drawing correctly.</p>
+
+<p>The engine cull was right the whole time. I came within one edit of "fixing" it. The fallback is now
+loud rather than silent: an unparsed font fails the run instead of guessing.</p>
+
+<pre>fixed regex, real code:     gibson off-screen = <span class="good">0</span>      ALL TEN SCENES PAINT WHAT THEY PLAN: yes
+fixed regex, cull removed:  gibson off-screen = <span class="bad">5241</span>   BROKEN SCENES: 1</pre>
+
+<h2>Verification</h2>
+
+<pre>npm test                                    <span class="good">206/206</span>
+xvfb-run -a electron tools/ascii-probe.js   <span class="good">ALL TEN SCENES PAINT WHAT THEY PLAN: yes</span></pre>
+
+<p>Full probe output: <a href="probe-green.txt">probe-green.txt</a> &middot;
+sabotage runs: <a href="probe-sabotage.txt">probe-sabotage.txt</a></p>
+
+<p>fps under software GL (the README's pessimistic floor). <code>gibson</code> is now the heaviest thing
+in the engine and sits at budget with nothing spare:</p>
+
+<pre>gibson    121 frames in 2003ms = <span class="warn">60.4 fps</span>     (~840 fillText/frame)
+skull     174 frames in 2004ms = 86.8 fps
+portscan  182 frames in 2003ms = 90.9 fps
+banner    228 frames in 2003ms = 113.8 fps
+nova      187 frames in 2005ms = 93.3 fps   (for scale)</pre>
+
+<h2>The scenes</h2>
+
+<div class="two">
+<figure><img src="banner.png" alt="ACID BURN in block letters"><figcaption><code>banner</code> &mdash; a 5x7 block font rasterised to full-block glyphs. The reveal rate is <b>derived from the lifetime</b>, not a constant: at a fixed 22ms/column, HACK THE PLANET (90 columns) finished assembling at ~68% of its life and faded immediately. The bloom lesson, which this repo documents and I walked into anyway.</figcaption></figure>
+<figure><img src="gibson.png" alt="wireframe ASCII city"><figcaption><code>gibson</code> &mdash; the fixed pinhole projection. The first version divided the ground offset by a constant <i>as well as</i> by z, collapsing 26 units of depth into ~100px of screen: every tower landed in one band on the horizon. It painted, on-screen, in its own glyphs, and the probe called it green. <b>Only looking at it found this.</b></figcaption></figure>
+<figure><img src="sniffer.png" alt="hexdump with credentials"><figcaption><code>sniffer</code> &mdash; PASS straddles rows 0000/0010, and both light. That's the cross-boundary fix; the original flagged neither.</figcaption></figure>
+<figure><img src="overflow.png" alt="smashed stack frame"><figcaption><code>overflow</code> &mdash; the frame floods bottom-up until <code>ret</code> is <code>0x41414141</code>.</figcaption></figure>
+<figure><img src="skull.png" alt="ascii skull"><figcaption><code>skull</code> &mdash; rezzes in scattered, not in reading order: it's an image, and an image that assembles left-to-right reads as text.</figcaption></figure>
+<figure><img src="wardial.png" alt="wardialing"><figcaption><code>wardial</code> &mdash; the carrier is always the last two lines, never one of the random ones.</figcaption></figure>
+</div>
+
+<h2>What I'd tell the next session</h2>
+
+<ul>
+<li><b>Sabotage every assertion you write.</b> Seven of eight bit; the eighth was a hole I'd never have found by reading it, in the test I'd have sworn was the most obviously correct.</li>
+<li><b>A green harness is a claim, not evidence</b> &mdash; and the harness is code, so it has bugs at the same rate as the feature. Of the three defects that survived the unit tests, <b>two were in the tools</b>. The probe was wrong more often than the engine was.</li>
+<li><b>A silent fallback in an oracle is worse than no oracle.</b> Both this and <code>salvage</code> lost time to exactly one shape of bug: a default that quietly stands in for a failed lookup. <code>\d</code> in a template literal is that bug in one character.</li>
+<li><b>The probe still can't see composition.</b> It said gibson was green while gibson was a smear of specks on the horizon. Counts prove a scene painted <i>its own content, somewhere visible</i>. They cannot prove it looks like a city. Look at it.</li>
+</ul>
+
+</body></html>

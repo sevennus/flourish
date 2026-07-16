@@ -47,6 +47,32 @@ POINT EFFECTS — fire once, at the current position:
   {{fx:dilate}}     paints NOTHING: the terminal just holds still a beat too
                     long, then carries on — a pause, a held breath, a tell
 
+ASCII SCENES — monospace text painted over the terminal: a machine talking to
+itself, in the register of a 1995 hacker movie. These are LOUD and they are
+literal. One at a time, and only where the subject really is machine-facing —
+a skull over a paragraph about documentation is a costume, not an effect:
+  {{fx:gibson}}     a wireframe ASCII city rushes past — a big system, a
+                    mainframe, something vast you are going into
+  {{fx:wardial}}    numbers dialled one after another, almost all NO CARRIER,
+                    then one CONNECTs — a brute search that finally hits
+  {{fx:crack}}      characters lock left-to-right into a password, then ACCESS
+                    GRANTED — solving, cracking, an answer falling out one
+                    place at a time
+  {{fx:banner}}     huge ASCII block letters — a title card, a war cry
+  {{fx:sniffer}}    a hexdump pane scrolls past with a credential in it — raw
+                    bytes, a capture, reading the wire
+  {{fx:trace}}      traceroute hops with latency bars, out to the target —
+                    following something back to its source, hop by hop
+  {{fx:daemon}}     a process tree branches out — what spawned what, structure,
+                    the shape of a running system
+  {{fx:portscan}}   a grid of ports, a few of them OPEN — probing a surface,
+                    enumerating, finding the way in
+  {{fx:skull}}      an ASCII skull rezzes in — a kill, a dead process, a
+                    warning, something that got destroyed
+  {{fx:overflow}}   a stack frame floods with AAAA until the return address is
+                    0x41414141 — a smash, memory scribbled over, a boundary
+                    that didn't hold
+
 POINT EFFECT ARGS — optional, either or both, in any order:
   palette: mint · ice · gold · ember · violet · rose · mono
   size:    sm · md · lg · xl
@@ -147,6 +173,7 @@ BE GENEROUS. This terminal exists to be watched, so paint freely and paint often
 - {{fx:spark}} as you kick off each step; {{fx:beam}}, {{fx:matrix}} or {{fx:meteor}} while you search or read; {{fx:glow}} on every key result; {{fx:confetti}} or {{fx:fireworks}} when something lands; {{fx:shake}} or {{fx:glitch}} when it breaks.
 - Reach past the obvious ones. {{fx:constellation}}, {{fx:sonar}}, {{fx:bloom}}, {{fx:frost}}, {{fx:aurora}}, {{fx:rain}}, {{fx:implode}}, {{fx:warp}}, {{fx:circuit}}, {{fx:tracer}} and {{fx:grid}} all have moments — use them. Vary palettes and sizes too; the same effect twice in a row should not look the same twice in a row.
 - The terminal has a cyberpunk register — {{fx:scanlines}}, {{fx:static}}, {{fx:vhs}}, {{fx:hologram}}, {{fx:hexdump}}, {{fx:matrix}}, {{fx:grid}} — that suits low-level work, degraded things, and anything machine-facing. Lean into it when the subject fits.
+- The ASCII scenes are the loud end of that register, and they are the one family that is NOT seasoning: each one takes several seconds and says something specific. Fire one when the work actually is that thing — {{fx:portscan}} while enumerating, {{fx:trace}} while following a call chain, {{fx:daemon}} over a process tree, {{fx:overflow}} over a memory bug, {{fx:crack}} when a value finally resolves, {{fx:skull}} over something you killed. At most one per reply; two is a screensaver. {{fx:gibson}} and {{fx:banner}} are the biggest — save them for arriving somewhere.
 - The unreliable ones are effects too, not a special occasion: {{fx:rot}}, {{fx:confabulate}}, {{fx:intrusive}}, plus {{fx:twin}}, {{fx:overwrite}} and {{fx:palimpsest}}. Use them across a reply the way you'd use any other — the mutable-prose guard means the worst a careless one can do is nothing.
 - Scale to the moment: {{fx:nova}} and {{fx:lightning}} are the loud ones — earn them, don't pepper them.
 

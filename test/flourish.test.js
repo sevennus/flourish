@@ -200,12 +200,35 @@ test('args are case-insensitive', () => {
 // prompt, and the effect just never plays with nothing to show for it.
 
 test('every point effect is handled by the engine', () => {
-  const { RENDERER_EFFECTS } = require('../src/flourish');
+  const { RENDERER_EFFECTS, ASCII_EFFECTS } = require('../src/flourish');
   const src = read('src/effects.js');
   for (const n of POINT_EFFECTS) {
     if (RENDERER_EFFECTS.has(n)) continue;   // handled before the engine ever sees it
+    if (ASCII_EFFECTS.has(n)) {
+      // The ASCII family has no case labels on purpose: fire() dispatches the
+      // whole set by name off ASCII_EFFECTS, so an eleventh scene costs no
+      // switch edit. A `case '...'` assertion here would be testing the
+      // mechanism rather than the defect — and the defect this test has always
+      // been about is a name in the vocabulary that nothing implements. So
+      // check the thing the dispatch actually reaches for.
+      assert.ok(src.includes(`_${n}(x, y, o) {`),
+        `effects.js has no _${n}() for the ascii dispatch to land on`);
+      continue;
+    }
     assert.ok(src.includes(`case '${n}':`), `effects.js fire() has no case for ${n}`);
   }
+});
+
+test('the ascii dispatch exists, so its methods are actually reachable', () => {
+  // The test above proves _gibson() etc. exist. Existing is not the same as
+  // being called: delete the default branch in fire() and every one of those
+  // methods is still there, still tested, and never runs again. This asserts
+  // the branch that connects them.
+  const src = read('src/effects.js');
+  assert.ok(/ASCII_EFFECTS\.has\(name\)/.test(src),
+    'fire() no longer dispatches ASCII_EFFECTS, so every ascii scene is dead code');
+  assert.ok(/const ASCII_EFFECTS = A\.ASCII_EFFECTS/.test(src),
+    'effects.js does not import ASCII_EFFECTS, so the dispatch matches nothing');
 });
 
 test('the renderer-handled effects are handled by the renderer', () => {
@@ -312,17 +335,19 @@ test('the text-effects reference sheet covers every style span', () => {
   }
 });
 
-test('the vocabulary is the full 59 effects', () => {
+test('the vocabulary is the full 69 effects', () => {
   // The count is asserted because the installed .exe embeds its own copy of
   // prompt.js, so the vocabulary Claude actually has is the one in the BUILD,
   // not the one in the repo. A session once reported "all 40 verified" against
   // a repo holding 50. A bare number here is the cheapest way to make that
   // drift fail loudly instead of quietly.
-  // POINT_EFFECTS stays 32 with shatter retired: a disabled effect keeps its
-  // name in the vocabulary so old transcripts don't print braces (see the
-  // retirement test above), so this count includes names that no longer paint.
-  assert.strictEqual(POINT_EFFECTS.size, 32);
+  // POINT_EFFECTS is 42: 32 + the ten ASCII scenes. Both counts include names
+  // that no longer paint — a disabled effect keeps its name in the vocabulary
+  // so old transcripts don't print braces (see the retirement test above).
+  assert.strictEqual(POINT_EFFECTS.size, 42);
   assert.strictEqual(STYLE_SPANS.size, 27);
+  const { ASCII_EFFECTS } = require('../src/flourish');
+  assert.strictEqual(ASCII_EFFECTS.size, 10);
 });
 
 test('the consuming spans are taught with their guardrail', () => {

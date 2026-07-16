@@ -45,6 +45,17 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // The ASCII register: scenes made of monospace text on the canvas, each one
+  // a machine talking to itself. They share one engine and one array in
+  // effects.js, and this set is what makes that possible — the dispatch, the
+  // draw pass and fx-shots' reset all read this name rather than each carrying
+  // its own hand-maintained copy of the list. Adding an eleventh means adding
+  // it here and teaching it in prompt.js; nothing else needs to know.
+  const ASCII_EFFECTS = new Set([
+    'gibson', 'wardial', 'crack', 'banner', 'sniffer',
+    'trace', 'daemon', 'portscan', 'skull', 'overflow',
+  ]);
+
   // Which directive names are point effects vs. wrapping style spans.
   const POINT_EFFECTS = new Set([
     'spark', 'confetti', 'fireworks', 'ripple', 'pulse', 'shake', 'matrix',
@@ -53,6 +64,7 @@
     'frost', 'bloom', 'rain', 'beam', 'implode',
     'scanlines', 'static', 'vhs', 'grid', 'circuit', 'tracer',
     'apophenia', 'dilate',
+    ...ASCII_EFFECTS,
   ]);
 
   // Effects that still parse but no longer paint.
@@ -863,6 +875,359 @@
     return r;
   }
 
+  // ---- ASCII scenes -------------------------------------------------------
+  //
+  // The cyberpunk register taken literally: text pretending to be a machine
+  // talking to itself. Ten scenes, planned here and merely *drawn* in
+  // effects.js.
+  //
+  // That split is the only reason they can be verified at all. `npm test`
+  // covers pure modules, and this repo's whole history is effects whose
+  // evidence was a screenshot that turned out to be photographing a fallback.
+  // A scene whose content is generated inside a canvas draw call can only be
+  // checked by looking at it. A scene whose content is a pure function of a
+  // seed can be counted. So everything with a fact in it — the hexdump's
+  // bytes, the traceroute's latencies, the stack's addresses — is decided
+  // here, where a test can call it with a fixed rng and assert on the output.
+  //
+  // Each planner takes an optional `rnd` and returns plain data. None of them
+  // touch a canvas, a DOM node, or a clock.
+
+  // 5x7 block font, '#' is ink. Only what a banner needs; an unknown character
+  // resolves to a blank cell rather than throwing, so a stray glyph costs a
+  // space instead of the scene.
+  const BANNER_5x7 = {
+    ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
+    A: ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
+    B: ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'],
+    C: ['.####', '#....', '#....', '#....', '#....', '#....', '.####'],
+    D: ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '####.'],
+    E: ['#####', '#....', '#....', '####.', '#....', '#....', '#####'],
+    F: ['#####', '#....', '#....', '####.', '#....', '#....', '#....'],
+    G: ['.####', '#....', '#....', '#.###', '#...#', '#...#', '.###.'],
+    H: ['#...#', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
+    I: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '#####'],
+    J: ['####.', '...#.', '...#.', '...#.', '...#.', '#..#.', '.##..'],
+    K: ['#...#', '#..#.', '#.#..', '##...', '#.#..', '#..#.', '#...#'],
+    L: ['#....', '#....', '#....', '#....', '#....', '#....', '#####'],
+    M: ['#...#', '##.##', '#.#.#', '#...#', '#...#', '#...#', '#...#'],
+    N: ['#...#', '##..#', '#.#.#', '#..##', '#...#', '#...#', '#...#'],
+    O: ['.###.', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
+    P: ['####.', '#...#', '#...#', '####.', '#....', '#....', '#....'],
+    Q: ['.###.', '#...#', '#...#', '#...#', '#.#.#', '#..#.', '.##.#'],
+    R: ['####.', '#...#', '#...#', '####.', '#.#..', '#..#.', '#...#'],
+    S: ['.####', '#....', '#....', '.###.', '....#', '....#', '####.'],
+    T: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
+    U: ['#...#', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
+    V: ['#...#', '#...#', '#...#', '#...#', '#...#', '.#.#.', '..#..'],
+    W: ['#...#', '#...#', '#...#', '#...#', '#.#.#', '##.##', '#...#'],
+    X: ['#...#', '#...#', '.#.#.', '..#..', '.#.#.', '#...#', '#...#'],
+    Y: ['#...#', '#...#', '.#.#.', '..#..', '..#..', '..#..', '..#..'],
+    Z: ['#####', '....#', '...#.', '..#..', '.#...', '#....', '#####'],
+    0: ['.###.', '#...#', '#..##', '#.#.#', '##..#', '#...#', '.###.'],
+    1: ['..#..', '.##..', '..#..', '..#..', '..#..', '..#..', '.###.'],
+    2: ['.###.', '#...#', '....#', '...#.', '..#..', '.#...', '#####'],
+    3: ['#####', '...#.', '..#..', '...#.', '....#', '#...#', '.###.'],
+    4: ['...#.', '..##.', '.#.#.', '#..#.', '#####', '...#.', '...#.'],
+    5: ['#####', '#....', '####.', '....#', '....#', '#...#', '.###.'],
+    6: ['..##.', '.#...', '#....', '####.', '#...#', '#...#', '.###.'],
+    7: ['#####', '....#', '...#.', '..#..', '.#...', '.#...', '.#...'],
+    8: ['.###.', '#...#', '#...#', '.###.', '#...#', '#...#', '.###.'],
+    9: ['.###.', '#...#', '#...#', '.####', '....#', '...#.', '.##..'],
+    '!': ['..#..', '..#..', '..#..', '..#..', '..#..', '.....', '..#..'],
+    '.': ['.....', '.....', '.....', '.....', '.....', '.##..', '.##..'],
+    '-': ['.....', '.....', '.....', '#####', '.....', '.....', '.....'],
+    '/': ['....#', '...#.', '...#.', '..#..', '.#...', '.#...', '#....'],
+  };
+
+  const BANNER_H = 7;
+
+  // Phrases a banner can spell. All from the movie, because the effect only
+  // means anything if the words do.
+  const BANNER_WORDS = [
+    'HACK THE PLANET', 'ZERO COOL', 'CRASH OVERRIDE', 'ACID BURN',
+    'THE GIBSON', 'MESS WITH THE BEST', 'DIE LIKE THE REST',
+  ];
+
+  /**
+   * Rasterise `text` into BANNER_H rows of '#'/'.'.
+   *
+   * Every row comes back the same length — a banner is a rectangle, and a
+   * ragged one shears its own columns. Unknown characters render as blank
+   * cells, so a phrase with a stray glyph loses the glyph, not the banner.
+   */
+  function bannerRows(text, font) {
+    const F = font || BANNER_5x7;
+    const chars = String(text).toUpperCase().split('');
+    const rows = [];
+    for (let r = 0; r < BANNER_H; r++) {
+      let line = '';
+      for (const ch of chars) {
+        const g = F[ch] || F[' '];
+        line += g[r] + '.';
+      }
+      rows.push(line);
+    }
+    return rows;
+  }
+
+  // The skull. Rezzes in as-is; nothing generates it, so it's data.
+  const SKULL = [
+    '     .-"      "-.     ',
+    '    /            \\    ',
+    '   |              |   ',
+    '   |,  .-.  .-.  ,|   ',
+    '   | )(_o/  \\o_)( |   ',
+    '   |/     /\\     \\|   ',
+    '   (_     ^^     _)   ',
+    '    \\__|IIIIII|__/    ',
+    '     | \\IIIIII/ |     ',
+    '     \\          /     ',
+    "      `--------`      ",
+  ];
+
+  /**
+   * Wardial: a column of numbers, nearly all of which fail.
+   *
+   * The carrier is ALWAYS the last two lines and is never one of the random
+   * ones. That's the scene's only real invariant — a wardial that dials
+   * forever and connects to nothing is just a number generator — so it's
+   * asserted rather than left to the rng.
+   */
+  function planWardial(rnd) {
+    const random = rnd || Math.random;
+    const area = ['212', '415', '312', '718', '206', '303'][(random() * 6) | 0];
+    const lines = [];
+    const n = 14 + ((random() * 8) | 0);
+    for (let i = 0; i < n; i++) {
+      const num = area + '-555-' + String(1000 + ((random() * 8999) | 0));
+      const r = random();
+      const verdict = r < 0.10 ? 'RINGING...' : r < 0.20 ? 'BUSY' : r < 0.26 ? 'VOICE' : 'NO CARRIER';
+      lines.push({ text: 'DIAL ' + num + '   ' + verdict, hit: false });
+    }
+    // 2600 Hz is the whistle that opened a trunk line, and 2600 is the
+    // magazine named after it. It is the only number here that answers.
+    lines.push({ text: 'DIAL ' + area + '-555-2600   ** CARRIER DETECTED **', hit: true });
+    lines.push({ text: 'CONNECT 28800/ARQ/V34/LAPM/V42BIS', hit: true });
+    return lines;
+  }
+
+  const SNIFFER_PAYLOADS = [
+    'GET /garbage.dat HTTP/1.0\r\nHost: gibson.ellingson.com\r\nAuthorization: Basic emVyb2Nvb2w6bG92ZQ==\r\n\r\n',
+    'USER zerocool\r\nPASS god\r\nSITE EXEC /bin/sh -c "cat /etc/shadow"\r\n226 Transfer complete.\r\n',
+    'RCPT TO: <plague@ellingson.com>\r\nDATA\r\nSubject: the garbage file\r\nthey are onto the worm.\r\n.\r\n',
+  ];
+
+  /**
+   * Sniffer: a hexdump pane.
+   *
+   * The hex column and the ASCII gutter are generated from the same bytes, so
+   * they cannot disagree — which is exactly what makes this testable: decode
+   * the hex back and it must reproduce the gutter, and the gutter's printable
+   * characters must reproduce the payload.
+   */
+  function planSniffer(payload, rnd) {
+    const random = rnd || Math.random;
+    const src = payload || SNIFFER_PAYLOADS[(random() * SNIFFER_PAYLOADS.length) | 0];
+    const bytes = [];
+    for (let i = 0; i < src.length; i++) bytes.push(src.charCodeAt(i) & 0xff);
+
+    // Where the interesting bytes are, matched against the WHOLE payload and
+    // then intersected with each 16-byte row.
+    //
+    // The obvious version tests each row's own gutter, and it is wrong in a way
+    // that paints perfectly: a 16-byte window splits `Authorization` about as
+    // often as not, so the substring is present in the dump and in no single
+    // row. Two of the three payloads here flagged nothing at all, and the scene
+    // still drew — just with the credential in the same colour as the rest.
+    const marks = [];
+    const re = /(PASS\s+\S+|Authorization:\s*\S+|\/etc\/shadow|garbage\.dat|worm)/gi;
+    for (let m = re.exec(src); m; m = re.exec(src)) marks.push([m.index, m.index + m[0].length]);
+
+    const lines = [];
+    for (let off = 0; off < bytes.length; off += 16) {
+      const chunk = bytes.slice(off, off + 16);
+      const hex = [];
+      for (let i = 0; i < 16; i++) {
+        hex.push(i < chunk.length ? ('0' + chunk[i].toString(16)).slice(-2) : '  ');
+      }
+      const ascii = chunk.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.')).join('');
+      const offs = ('000' + off.toString(16)).slice(-4);
+      lines.push({
+        text: offs + '  ' + hex.slice(0, 8).join(' ') + '  ' + hex.slice(8).join(' ')
+          + '  |' + (ascii + '                ').slice(0, 16) + '|',
+        // Flagged if this row overlaps a mark at all — a credential split
+        // across two rows lights both, which is what it looks like on the wire.
+        hit: marks.some(([a, b]) => a < off + 16 && b > off),
+      });
+    }
+    return lines;
+  }
+
+  const TRACE_HOPS = [
+    'gateway', 'core1.isp.net', 'ae-3.border-rtr', 'xe-0-0-1.nyc09',
+    'level3.transit', 'ellingson-edge', 'fw-01.ellingson', 'gibson.ellingson.com',
+  ];
+
+  /**
+   * Traceroute: hops out to the Gibson, with a latency bar.
+   *
+   * Latency is cumulative and therefore monotonic — each hop is strictly
+   * further than the last. A trace whose times wander is a trace that isn't
+   * modelling distance, and the bars stop meaning anything.
+   */
+  function planTrace(rnd) {
+    const random = rnd || Math.random;
+    const lines = [];
+    let ms = 0.4 + random() * 2;
+    for (let i = 0; i < TRACE_HOPS.length; i++) {
+      ms += 2 + random() * 18;
+      const bar = '#'.repeat(Math.max(1, Math.min(14, Math.round(ms / 6))));
+      lines.push({
+        text: String(i + 1).padStart(2) + '  ' + TRACE_HOPS[i].padEnd(22)
+          + ms.toFixed(1).padStart(6) + ' ms  ' + bar,
+        ms,
+        hit: i === TRACE_HOPS.length - 1,
+      });
+    }
+    lines.push({ text: '    ** TRACE COMPLETE - ' + TRACE_HOPS.length + ' HOPS TO THE GIBSON **', ms, hit: true });
+    return lines;
+  }
+
+  /**
+   * Daemon: a process tree that grows a branch at a time.
+   *
+   * Depth decides the prefix, and the last child of any parent gets the elbow
+   * rather than the tee — get that wrong and the tree grows a rail to nowhere.
+   */
+  function planDaemon(rnd) {
+    const random = rnd || Math.random;
+    const pid = () => 100 + ((random() * 9000) | 0);
+    const spec = [
+      ['init', []],
+      ['inetd', ['telnetd', 'fingerd']],
+      ['sshd', ['bash', 'scp']],
+      ['httpd', ['worker', 'worker', 'cgi-bin/phf']],
+      ['garbaged', ['worm', 'worm', 'worm']],
+    ];
+    const lines = [];
+    lines.push({ text: 'init(1)', depth: 0, hit: false });
+    for (let i = 1; i < spec.length; i++) {
+      const [name, kids] = spec[i];
+      const last = i === spec.length - 1;
+      lines.push({ text: (last ? ' `- ' : ' |- ') + name + '(' + pid() + ')', depth: 1, hit: false });
+      for (let k = 0; k < kids.length; k++) {
+        const kl = k === kids.length - 1;
+        lines.push({
+          text: (last ? '    ' : ' |  ') + (kl ? ' `- ' : ' |- ') + kids[k] + '(' + pid() + ')',
+          depth: 2,
+          hit: kids[k] === 'worm',
+        });
+      }
+    }
+    return lines;
+  }
+
+  const PORT_SVC = {
+    21: 'ftp', 22: 'ssh', 23: 'telnet', 25: 'smtp', 53: 'domain', 79: 'finger',
+    80: 'http', 110: 'pop3', 111: 'rpcbind', 135: 'msrpc', 139: 'netbios',
+    143: 'imap', 443: 'https', 445: 'microsoft-ds', 512: 'exec', 513: 'login',
+    514: 'shell', 993: 'imaps', 995: 'pop3s', 1080: 'socks', 1433: 'ms-sql',
+    1521: 'oracle', 2600: 'phreak', 3306: 'mysql', 3389: 'ms-wbt', 5432: 'postgres',
+    5900: 'vnc', 6000: 'x11', 6667: 'irc', 8080: 'http-alt', 8443: 'https-alt',
+    31337: 'elite',
+  };
+
+  /**
+   * Portscan: a grid of ports, a few of them open.
+   *
+   * 2600 and 31337 are open unconditionally. Left to the rng they'd be open
+   * about a fifth of the time, and the two ports that are the entire joke
+   * would be dark in most runs.
+   */
+  function planPortscan(rnd) {
+    const random = rnd || Math.random;
+    const ports = Object.keys(PORT_SVC).map(Number).sort((a, b) => a - b);
+    return ports.map((port) => {
+      if (port === 2600 || port === 31337) return { port, state: 'open', svc: PORT_SVC[port] };
+      const r = random();
+      const state = r < 0.16 ? 'open' : r < 0.26 ? 'filtered' : 'closed';
+      return { port, state, svc: PORT_SVC[port] };
+    });
+  }
+
+  /**
+   * Overflow: a stack frame, and then the smash.
+   *
+   * `rows` is the frame drawn top-down (high addresses first, the way every
+   * stack diagram is drawn). `flood` is how many rows of 0x41414141 the
+   * payload writes — always enough to reach the saved return address, because
+   * an overflow that stops inside the buffer is a bounds check working.
+   */
+  function planOverflow(rnd) {
+    const random = rnd || Math.random;
+    const base = 0xbffff000 + (((random() * 0x800) | 0) & ~3);
+    const hex = (n) => '0x' + ('0000000' + (n >>> 0).toString(16)).slice(-8);
+    const rows = [
+      { label: 'ret  ', addr: base + 0x1c, val: hex(0x08048400 + ((random() * 0x200) | 0)), kind: 'ret' },
+      { label: 'ebp  ', addr: base + 0x18, val: hex(base + 0x40), kind: 'ebp' },
+      { label: 'buf12', addr: base + 0x14, val: hex(0), kind: 'buf' },
+      { label: 'buf8 ', addr: base + 0x10, val: hex(0), kind: 'buf' },
+      { label: 'buf4 ', addr: base + 0x0c, val: hex(0), kind: 'buf' },
+      { label: 'buf0 ', addr: base + 0x08, val: hex(0), kind: 'buf' },
+    ];
+    // Filled bottom-up: buf0 first, ret last. Reaching `rows.length` means the
+    // return address is ours.
+    return { rows, flood: rows.length, smashed: '0x41414141' };
+  }
+
+  // The movie's four, verbatim: "the four most common passwords: love, secret,
+  // sex and god." The handles are the same joke one film later.
+  const CRACK_WORDS = ['LOVE', 'SECRET', 'SEX', 'GOD', 'ZEROCOOL', 'ACIDBURN', 'CRASHOVERRIDE'];
+  const CRACK_CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+
+  /**
+   * Crack: a field of characters that lock left to right.
+   *
+   * Each cell gets its own lock time, strictly increasing, so the reveal
+   * always sweeps one way. Cells are returned with the real character already
+   * in them — the spinning is a draw-time concern, not a data one.
+   */
+  function planCrack(word, rnd) {
+    const random = rnd || Math.random;
+    const target = (word || CRACK_WORDS[(random() * CRACK_WORDS.length) | 0]).toUpperCase();
+    const cells = [];
+    let t = 220;
+    for (let i = 0; i < target.length; i++) {
+      t += 90 + random() * 190;
+      cells.push({ ch: target[i], lockAt: t });
+    }
+    return { target, cells, doneAt: t + 260 };
+  }
+
+  /**
+   * Gibson: towers on a ground plane, pulled toward the viewer.
+   *
+   * Pure placement only. The projection is a 1/z divide and lives in the draw
+   * pass, because it needs the canvas size; what's decided here is where the
+   * city is and how tall it is, which is what a test can check.
+   */
+  function planGibson(rnd) {
+    const random = rnd || Math.random;
+    const towers = [];
+    const n = 30 + ((random() * 14) | 0);
+    for (let i = 0; i < n; i++) {
+      towers.push({
+        gx: (random() * 18) - 9,          // ground units either side of centre
+        z: 1.4 + random() * 26,           // depth; the viewer is at 0
+        rows: 3 + ((random() * 10) | 0),  // storeys
+        cols: 2 + ((random() * 3) | 0),
+        lit: random() < 0.4,
+      });
+    }
+    return towers;
+  }
+
   return {
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
     MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS,
@@ -874,5 +1239,9 @@
     BOLT_FALLOFF, boltPath, measurePath, forkPaths, leaderStair, revealAt,
     ANCHOR_MIN_SPREAD, MIN_SLOPE, anchorsFlat, stratifyAnchors,
     pairShallow, planApopheniaPairs,
+    ASCII_EFFECTS, BANNER_5x7, BANNER_H, BANNER_WORDS, bannerRows, SKULL,
+    SNIFFER_PAYLOADS, TRACE_HOPS, PORT_SVC, CRACK_WORDS, CRACK_CHARSET,
+    planWardial, planSniffer, planTrace, planDaemon, planPortscan,
+    planOverflow, planCrack, planGibson,
   };
 });
