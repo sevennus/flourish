@@ -31,6 +31,16 @@ body {
   pointer-events: none;
 }
 
+/* Beneath #app (z-index 1) but above body's background. Works only because
+   #app, #screen and #transcript are all transparent — give any of them a
+   background and this canvas silently disappears. */
+#fx-canvas-under {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
 #app {
   position: fixed;
   inset: 0;

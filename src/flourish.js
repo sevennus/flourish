@@ -523,6 +523,108 @@
     }
   }
 
+  // ---------- apophenia anchor geometry ----------
+  //
+  // apophenia is the only effect that hangs itself off real words instead of
+  // inventing its own points, so it's the only one that can be handed a point
+  // set that doesn't work. Both rules live here — pure, no DOM — because the
+  // version that shipped was broken in a way no DOM-free test could see and no
+  // screenshot caught either.
+
+  // Words on one line of text share a baseline: spread in x, zero spread in y.
+  // A web drawn between points that share a baseline is a horizontal rule
+  // through the prose. It doesn't read as a faint constellation, it reads as a
+  // strikethrough — see assets/fx/probe/apophenia-real-path.png.
+  const ANCHOR_MIN_SPREAD = 24;   // px, required on BOTH axes
+
+  function anchorsFlat(pts) {
+    if (!pts || pts.length < 3) return true;
+    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+    return (Math.max(...xs) - Math.min(...xs)) < ANCHOR_MIN_SPREAD
+        || (Math.max(...ys) - Math.min(...ys)) < ANCHOR_MIN_SPREAD;
+  }
+
+  // Choose `max` anchors spread over as many lines of text as possible.
+  //
+  // The obvious sampling — walk back from the caret, take the first `max` words
+  // — is what shipped. Fourteen consecutive words is almost exactly one line of
+  // text, so it returned a collinear set every single time, by construction
+  // rather than by luck. Round-robin one word per line per pass instead:
+  // vertical spread is the thing this effect cannot do without.
+  //
+  // `rnd` is injectable so a test can pin the choice.
+  function stratifyAnchors(cand, max, rnd) {
+    const random = rnd || Math.random;
+    const rows = new Map();
+    for (const c of cand) {
+      const key = Math.round(c.y / 6);   // same visual line, give or take
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push(c);
+    }
+    const buckets = [...rows.keys()].sort((a, b) => a - b).map((k) => rows.get(k));
+    // Shuffle within each line so a re-fire doesn't pick the same words twice.
+    for (const b of buckets) {
+      for (let i = b.length - 1; i > 0; i--) {
+        const j = (random() * (i + 1)) | 0;
+        const t = b[i]; b[i] = b[j]; b[j] = t;
+      }
+    }
+    const out = [];
+    for (let pass = 0; out.length < max; pass++) {
+      let took = 0;
+      for (const b of buckets) {
+        if (b.length <= pass) continue;
+        out.push(b[pass]); took++;
+        if (out.length >= max) break;
+      }
+      if (!took) break;   // every line exhausted
+    }
+    return out;
+  }
+
+  // Which anchors get linked to which.
+  //
+  // anchorsFlat() is a whole-set check and it is not sufficient on its own: a
+  // set can span six lines, pass it, and still pair two words that sit on one
+  // line as each other — that pair alone draws a rule through that line.
+  //
+  // But "not the same baseline" isn't the rule either. Two words on ADJACENT
+  // lines a thousand pixels apart make a segment at about five degrees, and it
+  // grazes along the prose for its whole length. It reads as an underline just
+  // as much as a flat one does. The defect was never the baseline, it's the
+  // ANGLE: a shallow segment travels along the text instead of across the page.
+  // One rule covers both, since a same-line pair has slope zero.
+  //
+  // Text is wide and short — a line of prose is ~1000px of run and ~22px of
+  // rise — so this is not a symmetric threshold and shouldn't be. It has to
+  // exclude the whole family of near-horizontal links the layout makes easy.
+  const MIN_SLOPE = 0.18;   // rise per unit run, ≈10° off horizontal
+
+  function pairShallow(a, b) {
+    return Math.abs(a.y - b.y) < MIN_SLOPE * Math.abs(a.x - b.x);
+  }
+
+  function planApopheniaPairs(pts, rnd) {
+    const random = rnd || Math.random;
+    const want = Math.min(9, Math.max(3, Math.round(pts.length * 0.8)));
+    const seen = new Set();
+    const pairs = [];
+    // Distance is deliberately ignored — apophenia links things that have
+    // nothing to do with each other, and a long line is the effect working.
+    // Only the angle disqualifies a pair.
+    for (let k = 0; k < want * 12 && pairs.length < want; k++) {
+      const i = (random() * pts.length) | 0;
+      const j = (random() * pts.length) | 0;
+      if (i === j) continue;
+      if (pairShallow(pts[i], pts[j])) continue;
+      const key = Math.min(i, j) + ':' + Math.max(i, j);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({ i, j, at: pairs.length * 210 });
+    }
+    return pairs;
+  }
+
   return {
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
     MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS,
@@ -530,5 +632,7 @@
     WIND_STRENGTH, parseWind, planBurn,
     ROT_GROUPS, ROT_VARIANTS, rotVariants,
     CONFAB_PAIRS, planConfab, overwriteShift, mutableMask,
+    ANCHOR_MIN_SPREAD, MIN_SLOPE, anchorsFlat, stratifyAnchors,
+    pairShallow, planApopheniaPairs,
   };
 });

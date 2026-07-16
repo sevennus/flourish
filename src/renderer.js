@@ -39,7 +39,7 @@
   const input = el('input');
   const sendBtn = el('send-btn');
   const inputRow = el('input-row');
-  const effects = new window.FlourishEffects(el('fx-canvas'));
+  const effects = new window.FlourishEffects(el('fx-canvas'), el('fx-canvas-under'));
   const inputFX = new window.FlourishInputFX(input, effects, inputRow);
   const textFX = new window.FlourishTextFX(effects);
 
@@ -319,29 +319,47 @@
   // The engine never reads the DOM (see the header of effects.js) — the renderer
   // owns the text, so it measures, and hands the engine bare coordinates.
   //
-  // One Range per word would be a layout read per word, so this samples: at most
-  // MAX words, taken from the tail of the transcript, which is what's on screen.
+  // One Range per word would be a layout read per word, so this samples: it
+  // measures at most CANDIDATES words from the tail of the transcript, then
+  // stratifyAnchors picks `max` of them spread over as many lines as it can.
+  //
+  // Taking the first `max` words off the tail directly — which is what this did
+  // until 2026-07-16 — looks like the same thing and isn't. Fourteen
+  // consecutive words is about one line of text, so the anchors came back
+  // collinear every single time and apophenia drew a rule through the prose
+  // instead of a web. It was never once visible. The candidate pool has to be
+  // several times `max` for there to be anything to stratify over.
+  const CANDIDATES = 90;
+
   function wordAnchors(max) {
-    const out = [];
+    const cand = [];
     const walk = document.createTreeWalker(transcript, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walk.nextNode()) nodes.push(walk.currentNode);
     const range = document.createRange();
-    const top = screen.getBoundingClientRect().top;
-    for (let i = nodes.length - 1; i >= 0 && out.length < max; i--) {
+    const sr = screen.getBoundingClientRect();
+    for (let i = nodes.length - 1; i >= 0 && cand.length < CANDIDATES; i--) {
       const text = nodes[i].nodeValue;
       const re = /[A-Za-z]{3,}/g;
       let m;
-      while ((m = re.exec(text)) !== null && out.length < max) {
+      while ((m = re.exec(text)) !== null && cand.length < CANDIDATES) {
         range.setStart(nodes[i], m.index);
         range.setEnd(nodes[i], m.index + m[0].length);
         const r = range.getBoundingClientRect();
-        if (r.width === 0 || r.bottom < top) continue;   // off-screen or collapsed
-        out.push({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+        // Collapsed, or scrolled out of the viewport either way. The old code
+        // only excluded words above the top, which was harmless only because
+        // it never looked far enough back to reach anything below.
+        if (r.width === 0 || r.bottom < sr.top || r.top > sr.bottom) continue;
+        cand.push({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
       }
     }
-    return out;
+    return window.Flourish.stratifyAnchors(cand, max);
   }
+
+  // Exposed for tools/fx-shots.js, which has to fire apophenia the way
+  // applyEvents does. It firing with no anchors at all is precisely why a
+  // broken effect shipped with a beautiful screenshot of its fallback path.
+  window.Flourish.wordAnchors = wordAnchors;
 
   // Effects the renderer handles itself rather than handing to the canvas.
   // Returns true if the caller should stop and let the pause happen.

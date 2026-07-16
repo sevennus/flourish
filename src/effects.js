@@ -23,6 +23,13 @@
 
   const TAU = Math.PI * 2;
 
+  // Geometry rules for apophenia's anchors live in the parser module — pure, so
+  // `node --test` can reach them. Falling back to the old "fewer than 3 points"
+  // test if it isn't loaded keeps this file standalone rather than throwing.
+  const anchorsFlat = (window.Flourish && window.Flourish.anchorsFlat)
+    || ((pts) => !pts || pts.length < 3);
+  const planApopheniaPairs = window.Flourish && window.Flourish.planApopheniaPairs;
+
   // Named palettes, addressable from a directive: `{{fx:spark gold}}`.
   const PALETTES = {
     mint:   ['#35f0a0', '#7effc4', '#ffffff', '#37b6ff'],
@@ -116,9 +123,16 @@
   const MAX_PARTICLES = 16000;
 
   class FlourishEffects {
-    constructor(canvas) {
+    // `underCanvas` is optional and sits BEHIND the text (z-index 0 vs the
+    // overlay's 50). Only apophenia uses it: its web is drawn between real
+    // words, so on the overlay it paints on top of the very prose it's linking
+    // and reads as a strikethrough. Behind the text it reads as a web. Every
+    // other effect stays on the overlay, where being on top is the point.
+    constructor(canvas, underCanvas) {
       this.canvas = canvas;
       this.ctx = canvas.getContext('2d');
+      this.underCanvas = underCanvas || null;
+      this.under = underCanvas ? underCanvas.getContext('2d') : null;
       this.dpr = window.devicePixelRatio || 1;
       this.particles = [];
       this.rings = [];
@@ -139,11 +153,15 @@
       this.dpr = window.devicePixelRatio || 1;
       this.w = window.innerWidth;
       this.h = window.innerHeight;
-      this.canvas.width = Math.floor(this.w * this.dpr);
-      this.canvas.height = Math.floor(this.h * this.dpr);
-      this.canvas.style.width = this.w + 'px';
-      this.canvas.style.height = this.h + 'px';
+      for (const c of [this.canvas, this.underCanvas]) {
+        if (!c) continue;
+        c.width = Math.floor(this.w * this.dpr);
+        c.height = Math.floor(this.h * this.dpr);
+        c.style.width = this.w + 'px';
+        c.style.height = this.h + 'px';
+      }
       this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      if (this.under) this.under.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     }
 
     /**
@@ -606,9 +624,11 @@
     _apophenia(x, y, o) {
       const cols = o.pal || ['#b98cff', '#7effc4', '#ffffff'];
       let pts = (o.anchors || []).slice();
-      // No words on screen to hang it off — fall back to inventing some, which
-      // is thematically exactly right.
-      if (pts.length < 3) {
+      // Nothing on screen to hang it off, or everything we got shares one
+      // baseline (a short reply, one line of transcript) — fall back to
+      // inventing some, which is thematically exactly right. Never draw the
+      // flat set: a rule through the prose is worse than no effect at all.
+      if (anchorsFlat(pts)) {
         pts = [];
         for (let i = 0; i < 8; i++) {
           const a = rand(0, TAU), r = Math.sqrt(Math.random()) * 260 * o.scale;
@@ -617,20 +637,10 @@
       }
       pts = pts.map((p) => ({ x: p.x, y: p.y, size: rand(1.6, 3.0) * o.scale, color: pick(cols) }));
 
-      // Random pairs, distance ignored on purpose. No pair twice — the effect is
-      // a confident argument, and a confident argument doesn't repeat itself.
-      const want = Math.min(9, Math.max(3, Math.round(pts.length * 0.8)));
-      const seen = new Set();
-      const pairs = [];
-      for (let k = 0; k < want * 6 && pairs.length < want; k++) {
-        const i = (Math.random() * pts.length) | 0;
-        const j = (Math.random() * pts.length) | 0;
-        if (i === j) continue;
-        const key = Math.min(i, j) + ':' + Math.max(i, j);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        pairs.push({ i, j, at: pairs.length * 210 });
-      }
+      // Random pairs across lines, distance ignored on purpose. No pair twice —
+      // the effect is a confident argument, and a confident argument doesn't
+      // repeat itself. The rule lives in flourish.js so it can be tested.
+      const pairs = planApopheniaPairs(pts);
       this.webs = {
         pts, pairs, life: 0,
         max: (pairs.length * 210) + 2600,
@@ -985,6 +995,7 @@
         } else {
           this.running = false;
           this.ctx.clearRect(0, 0, this.w, this.h);
+          if (this.under) this.under.clearRect(0, 0, this.w, this.h);
         }
       };
       requestAnimationFrame(step);
@@ -1113,6 +1124,7 @@
     _draw() {
       const ctx = this.ctx;
       ctx.clearRect(0, 0, this.w, this.h);
+      if (this.under) this.under.clearRect(0, 0, this.w, this.h);
 
       // Aurora sits furthest back — it's a backdrop, not a burst.
       if (this.sheets.length) {
@@ -1335,9 +1347,12 @@
         const W = this.webs;
         const t = W.life / W.max;
         const fade = t > 0.78 ? 1 - (t - 0.78) / 0.22 : 1;
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.lineWidth = 1.1;
+        // Behind the text where there's a canvas for it: these lines run
+        // between real words, and on top they strike them through.
+        const wc = this.under || ctx;
+        wc.save();
+        wc.globalCompositeOperation = 'lighter';
+        wc.lineWidth = 1.1;
         for (const pr of W.pairs) {
           const age = W.life - pr.at;
           if (age <= 0) continue;
@@ -1346,20 +1361,20 @@
           // Distance is not evidence here, so unlike constellation the alpha
           // doesn't fall off with length — a line across the whole screen is
           // asserted exactly as confidently as one between neighbours.
-          ctx.strokeStyle = `rgba(${W.color},${(0.5 * fade).toFixed(3)})`;
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(a.x + (b.x - a.x) * grow, a.y + (b.y - a.y) * grow);
-          ctx.stroke();
+          wc.strokeStyle = `rgba(${W.color},${(0.5 * fade).toFixed(3)})`;
+          wc.beginPath();
+          wc.moveTo(a.x, a.y);
+          wc.lineTo(a.x + (b.x - a.x) * grow, a.y + (b.y - a.y) * grow);
+          wc.stroke();
         }
-        ctx.globalAlpha = fade;
+        wc.globalAlpha = fade;
         for (const p of W.pts) {
           const sprite = glowSprite(p.color);
           const d = p.size * 5;
-          ctx.drawImage(sprite, p.x - d / 2, p.y - d / 2, d, d);
+          wc.drawImage(sprite, p.x - d / 2, p.y - d / 2, d, d);
         }
-        ctx.restore();
-        ctx.globalAlpha = 1;
+        wc.restore();
+        wc.globalAlpha = 1;
       }
 
       // Lightning: a wide soft pass under a bright core, flickering as it dies.

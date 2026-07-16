@@ -112,10 +112,13 @@ async function run() {
 
   fs.mkdirSync(OUT, { recursive: true });
 
-  // A dedicated engine instance over the same canvas — the renderer's own is
+  // A dedicated engine instance over the same canvases — the renderer's own is
   // idle unless a reply is streaming, so the two never fight over the frame.
+  // The under-canvas has to be passed here too, or apophenia's web is drawn to
+  // a context that isn't on screen and the shot comes out empty.
   await win.webContents.executeJavaScript(
-    `window.__fx = new window.FlourishEffects(document.getElementById('fx-canvas'));
+    `window.__fx = new window.FlourishEffects(
+       document.getElementById('fx-canvas'), document.getElementById('fx-canvas-under'));
      document.getElementById('transcript').innerHTML =
        '<div class="line system"><div class="body">✦ effect under test</div></div>'; true;`);
 
@@ -133,6 +136,8 @@ async function run() {
       fx.sheets = []; fx.sweeps = [];
       fx.links = null; fx.webs = null; fx.frost = null; fx.matrix = null;
       fx.noise = null; fx.grid = null; fx.traces = null; fx.tracers = null;
+      // The under-canvas isn't cleared by the loop once it stops running.
+      if (fx.under) fx.under.clearRect(0, 0, fx.w, fx.h);
       // The DOM-driven ones latch a class rather than living in an array.
       const app = document.getElementById('app');
       if (app) app.classList.remove('vhs', 'glitch', 'shake');
@@ -141,13 +146,58 @@ async function run() {
       return true;
     })();`);
 
+  // apophenia is the only point effect whose input comes from outside itself:
+  // the renderer measures the words on screen and hands it anchors. Fired bare
+  // like every other effect here, o.anchors is undefined and it quietly takes
+  // its no-anchors fallback — so this harness spent a whole release
+  // photographing a pretty fallback while the real path drew a rule through the
+  // prose and Jim saw nothing. It gets real prose and real anchors, and the
+  // shot fails loudly rather than falling back.
+  // Long enough to be a real reply. A four-line transcript is not a fair test:
+  // every link in it is near-horizontal because there's nowhere else to go, and
+  // a shot of that is a shot of a page shape Jim never sees.
+  const PROSE =
+    'The deploy failed on Tuesday. Tuesday is also when the cache was warm. '
+    + 'Warm caches correlate with the mint palette, and mint was chosen the same '
+    + 'week the renderer died. Therefore the palette killed the deploy.\n\n'
+    + 'Latency rose after the schema change. The schema change shipped alongside '
+    + 'the new font. Fonts are rendered by the same GPU that runs the particle '
+    + 'canvas, and the particle canvas is what we added last month. So the '
+    + 'flourishes are slowing down the API, and always have been.\n\n'
+    + 'The build number is odd this week. Odd builds have historically been the '
+    + 'ones that break, and this one shipped on a Thursday, and Thursday is when '
+    + 'the tests were rewritten. The tests are therefore why the number is odd.\n\n'
+    + 'Every sentence above is asserted with exactly the same confidence as the '
+    + 'one before it, and none of them has anything to do with any other. That '
+    + 'is the entire point of the effect being demonstrated here.';
+
+  const setTranscript = (html) => win.webContents.executeJavaScript(
+    `document.getElementById('transcript').innerHTML = ${JSON.stringify(html)}; true;`);
+  const PLAIN = '<div class="line system"><div class="body">✦ effect under test</div></div>';
+
   console.log('point effects:');
   for (const [name, delay] of POINT) {
     await reset();
+    if (name === 'apophenia') { await setTranscript(`<div class="line assistant"><div class="body">${PROSE}</div></div>`); }
     await wait(160);
-    await win.webContents.executeJavaScript(`window.__fx.fire('${name}', 560, 330); true;`);
+    if (name === 'apophenia') {
+      await win.webContents.executeJavaScript(`
+        (function () {
+          const a = window.Flourish.wordAnchors(14);
+          // The two ways this shot can lie about a working effect.
+          if (a.length < 3) throw new Error('fx-shots: wordAnchors returned ' + a.length
+            + ' anchors — this shot would be the fallback, not apophenia');
+          if (window.Flourish.anchorsFlat(a)) throw new Error('fx-shots: anchors are collinear'
+            + ' — this shot would be the fallback, and the real effect a line through the text');
+          window.__fx.fire('apophenia', 560, 330, { anchors: a, palette: 'violet' });
+          return true;
+        })();`);
+    } else {
+      await win.webContents.executeJavaScript(`window.__fx.fire('${name}', 560, 330); true;`);
+    }
     await wait(delay);
     await shoot(win, name);
+    if (name === 'apophenia') await setTranscript(PLAIN);
     await wait(200);
   }
   await reset();
