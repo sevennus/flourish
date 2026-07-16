@@ -51,7 +51,18 @@ const DEFAULT_CONFIG = {
   model: '',                // blank = Claude Code's default
   bypass: true,             // run claude with --permission-mode bypassPermissions
   demoMode: false,
+  // Dev loop: load the renderer from the VM instead of the copy inside this
+  // build (e.g. http://100.76.34.62/flourish/). Blank = use the packaged files.
+  // Only the UI moves; the SSH bridge, your key and the system prompt stay in
+  // this process, so a live UI can never widen what the app is able to do.
+  devUrl: '',
 };
+
+// Stamped by tools/stamp.js at package time; absent in a raw checkout.
+function buildInfo() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')); }
+  catch { return { sha: 'unstamped', branch: '?', dirty: true }; }
+}
 
 function configPath() { return path.join(app.getPath('userData'), 'config.json'); }
 function loadConfig() {
@@ -162,6 +173,7 @@ function streamDemo(sender, requestId, responseText) {
 // --- IPC --------------------------------------------------------------------
 ipcMain.handle('config:get', () => loadConfig());
 ipcMain.handle('config:save', (_e, cfg) => saveConfig(cfg));
+ipcMain.handle('build:get', () => Object.assign(buildInfo(), { live: !!currentDevUrl }));
 ipcMain.handle('session:reset', () => { lastSessionId = null; return true; });
 
 ipcMain.handle('ssh:test', async (_e, cfg) => {
@@ -197,6 +209,8 @@ ipcMain.on('chat:abort', (_e, { requestId } = {}) => {
 });
 
 // --- window + screenshot ----------------------------------------------------
+let currentDevUrl = '';
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1120, height: 720, minWidth: 640, minHeight: 420,
@@ -207,7 +221,39 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
-  win.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  // The dev loop. Env var beats config so a shortcut can force it without
+  // touching saved settings; --screenshot/smoke always use packaged files, or a
+  // stale VM would silently decide what the CI shot proves.
+  currentDevUrl = SCREENSHOT ? '' : (process.env.FLOURISH_DEV_URL || loadConfig().devUrl || '').trim();
+
+  if (currentDevUrl) {
+    win.loadURL(currentDevUrl);
+    // If the VM is unreachable, say so in the window instead of leaving Jim
+    // staring at a blank rectangle wondering if the app is broken again.
+    win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+      if (code === -3) return;                       // aborted; usually a redirect
+      const msg = `Can't load the live UI from ${url}\n${desc} (${code})\n\n` +
+        `Is the VM up and are you on Tailscale? Clear the "Live UI URL" box in ` +
+        `settings to fall back to the UI packaged in this build.`;
+      win.loadURL('data:text/html,' + encodeURIComponent(
+        `<body style="background:#05070a;color:#e6edf3;font:14px/1.6 monospace;padding:3em">
+         <h2 style="color:#ff6b6b">Flourish — live UI unreachable</h2><pre>${msg}</pre></body>`));
+    });
+  } else {
+    win.loadFile(path.join(__dirname, 'src', 'index.html'));
+  }
+
+  // Ctrl-R / F5 = pick up the latest UI. The menu bar is hidden, and hiding it
+  // takes the default reload accelerator with it, so bind them explicitly —
+  // without this the whole live-reload loop is just a slower restart.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    const reload = input.key === 'F5' || ((input.control || input.meta) && input.key.toLowerCase() === 'r');
+    if (reload) { e.preventDefault(); win.webContents.reloadIgnoringCache(); }
+    if (input.key === 'F12') { e.preventDefault(); win.webContents.toggleDevTools(); }
+  });
+
   if (SCREENSHOT) win.webContents.once('did-finish-load', () => runScreenshot());
 }
 

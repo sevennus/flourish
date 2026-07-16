@@ -20,6 +20,11 @@ contextBridge.exposeInMainWorld('flourishAPI', {
   sshTest: (cfg) => ipcRenderer.invoke('ssh:test', cfg),
   resetSession: () => ipcRenderer.invoke('session:reset'),
 
+  // Which app shell is running. The renderer knows its OWN build from
+  // build-info.js, but when the UI is served live off the VM those are two
+  // different commits — and the gap between them is the whole reason this exists.
+  getBuild: () => ipcRenderer.invoke('build:get'),
+
   // chat
   send: (payload) => ipcRenderer.send('chat:send', payload),
   abort: (requestId) => ipcRenderer.send('chat:abort', { requestId }),

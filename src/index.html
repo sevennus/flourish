@@ -14,6 +14,7 @@
   <div id="app">
     <header id="titlebar">
       <div class="brand"><span class="brand-mark">✦</span> Flourish</div>
+      <span id="build-stamp" class="build" title="Which code is actually running"></span>
       <div class="status">
         <span id="status-dot" class="dot"></span>
         <span id="status-text">starting…</span>
@@ -84,6 +85,11 @@
         <span>Demo mode — scripted replies, no VM required (just show the effects)</span>
       </label>
 
+      <label class="field"><span>Live UI URL (dev — blank uses the UI in this build)</span>
+        <input id="cfg-devurl" type="text" placeholder="http://100.76.34.62/flourish/" spellcheck="false" />
+        <small>Loads the interface straight off the VM, so a UI change is Ctrl-R
+          instead of a new download. Ctrl-R reloads, F12 opens devtools. Tailnet only.</small></label>
+
       <div id="test-result" class="test-result"></div>
       <div class="settings-actions">
         <button id="settings-test" type="button" class="ghost">Test connection</button>
@@ -94,6 +100,7 @@
     </div>
   </div>
 
+  <script src="build-info.js"></script>
   <script src="flourish.js"></script>
   <script src="scroller.js"></script>
   <script src="autofx.js"></script>

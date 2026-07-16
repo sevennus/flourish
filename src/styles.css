@@ -51,6 +51,18 @@ body {
 }
 .brand { font-weight: 600; letter-spacing: 0.5px; color: var(--fg); }
 .brand-mark { color: var(--accent); text-shadow: 0 0 10px var(--accent); }
+/* Which commit is on screen. Dim by design — it should be findable when a
+   build misbehaves, not competing with the transcript the rest of the time. */
+.build {
+  font-family: var(--font-num, monospace);
+  font-size: 11px; color: var(--fg-dim); opacity: 0.55;
+  margin-left: 10px; padding: 1px 6px; border-radius: 4px;
+  border: 1px solid transparent; cursor: default; white-space: nowrap;
+}
+.build:hover { opacity: 1; }
+/* Live UI = you are not looking at the packaged app. Worth a tell. */
+.build.live { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); opacity: 0.8; }
+
 .status { margin-left: auto; display: flex; align-items: center; gap: 7px; color: var(--fg-dim); font-size: 13px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-dim); box-shadow: 0 0 0 rgba(0,0,0,0); }
 .dot.live { background: var(--accent); box-shadow: 0 0 8px var(--accent); }

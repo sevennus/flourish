@@ -183,7 +183,10 @@
   let softReveal = false;
 
   // Append text, merging into the trailing text node so a run stays one node.
-  function appendText(tgt, s) {
+  // Named apart from appendText() below: both live in this scope, so a shared
+  // name means the later declaration silently wins and every call lands in the
+  // wrong function.
+  function appendRaw(tgt, s) {
     const last = tgt.lastChild;
     if (last && last.nodeType === 3) last.appendData(s);
     else tgt.appendChild(document.createTextNode(s));
@@ -203,7 +206,7 @@
 
   function softInto(tgt, str) {
     for (const ch of str) {
-      if (ch === '\n' || ch === ' ' || ch === '\t') { appendText(tgt, ch); continue; }
+      if (ch === '\n' || ch === ' ' || ch === '\t') { appendRaw(tgt, ch); continue; }
       const i = document.createElement('i');
       i.className = 'ch';
       i.textContent = ch;
@@ -230,7 +233,7 @@
     const fx = perCharFx();
     if (!fx) {
       if (softReveal && !reduceMotion) softInto(tgt, str);
-      else appendText(tgt, str);
+      else appendRaw(tgt, str);
       return;
     }
     for (const ch of str) {
@@ -505,6 +508,7 @@
     el('cfg-model').value = cfg.model || '';
     el('cfg-bypass').checked = cfg.bypass !== false;
     el('cfg-demo').checked = !!cfg.demoMode;
+    el('cfg-devurl').value = cfg.devUrl || '';
     el('test-result').textContent = '';
     syncAuthBlocks();
     overlay.classList.remove('hidden');
@@ -523,6 +527,7 @@
       model: el('cfg-model').value.trim(),
       bypass: el('cfg-bypass').checked,
       demoMode: el('cfg-demo').checked,
+      devUrl: el('cfg-devurl').value.trim(),
     };
   }
 
@@ -536,14 +541,48 @@
     r.className = 'test-result ' + (res.ok ? 'ok' : 'bad');
   });
   el('settings-save').addEventListener('click', async () => {
+    const before = cfg.devUrl || '';
     cfg = await api.saveConfig(formValues());
     setStatus('idle'); closeSettings();
+    // Which document is loaded is decided at window-create time, so this one
+    // setting can't apply itself. Saying so beats Jim changing it, seeing no
+    // difference, and concluding the feature is broken.
+    if ((cfg.devUrl || '') !== before) {
+      plainLine('system', cfg.devUrl
+        ? '✦ Live UI set to ' + cfg.devUrl + ' — restart Flourish to load it. After that, Ctrl-R picks up changes.'
+        : '✦ Live UI turned off — restart Flourish to go back to the UI packaged in this build.');
+    }
   });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSettings(); });
+
+  // ---------- build stamp ----------
+  // Two builds shipped broken and nobody could say which code was in them; a
+  // session once "verified" 40 effects against a .exe whose prompt.js predated
+  // the other 10. So name the code on screen. When the UI is served live off
+  // the VM these are genuinely two different commits — ui is what you're
+  // looking at, app is the shell that owns the SSH bridge — and showing only
+  // one would recreate the exact confusion this is here to end.
+  async function showBuild() {
+    const ui = window.FLOURISH_BUILD || { sha: 'unstamped', dirty: true };
+    let app = null;
+    try { app = await api.getBuild(); } catch { /* older shell, no build:get */ }
+    const tag = (b) => b ? b.sha + (b.dirty ? '+' : '') : '?';
+    const node = el('build-stamp');
+    if (!node) return;
+    const live = app && app.live;
+    node.textContent = live ? `ui ${tag(ui)} · app ${tag(app)} · live` : tag(ui);
+    node.classList.toggle('live', !!live);
+    node.title = [
+      `UI:  ${tag(ui)}${ui.branch ? ' (' + ui.branch + ')' : ''}${live ? ' — served live from the VM' : ' — packaged in this build'}`,
+      app ? `App: ${tag(app)}${app.branch ? ' (' + app.branch + ')' : ''} — the packaged shell (SSH bridge, system prompt)` : '',
+      '+ means uncommitted changes were in the tree when it was stamped.',
+    ].filter(Boolean).join('\n');
+  }
 
   // ---------- boot ----------
   (async function boot() {
     cfg = await api.getConfig();
+    showBuild();
     setStatus('idle');
     const configured = cfg.demoMode || (cfg.host && cfg.username);
     plainLine('system', '✦ Flourish ready. ' + (configured
