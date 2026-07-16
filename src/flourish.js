@@ -183,93 +183,56 @@
     return at;
   }
 
-  // ---- rot: characters decaying toward lookalikes ----
+  // ---- rot: characters flickering between lookalikes ----
 
-  // Each character's decay path, one step at a time, ending at a full stop.
-  // The chains are built on SHAPE, not on meaning: every step has to be a glyph
-  // the reader could plausibly have misread the previous one as, or the effect
-  // reads as corruption (which `corrupt` already does, loudly) rather than as
-  // text going soft while you weren't looking.
+  // Glyphs grouped by SHAPE: every member of a group is one the reader could
+  // plausibly misread another member as. Shape, not meaning — a swap that isn't
+  // a lookalike reads as corruption (which `corrupt` already does, loudly)
+  // rather than as one character failing to sit still.
   //
-  // Everything converges on '.' rather than on ' '. A rotted line has to keep
-  // its shape — holes would reflow the paragraph, and a period is the smallest
-  // mark that still holds a character's box.
+  // These replace a set of one-way decay chains. Every character used to walk
+  // down its chain toward '.', dimming as it went, so a paragraph didn't wobble
+  // — it eroded into punctuation and then into the background. rot now picks a
+  // lookalike, holds it for a beat, and puts the true character back, which
+  // makes the groups deliberately CYCLIC. There is no terminal glyph left to
+  // reach, so there is nothing to prove terminates and nothing to bottom out
+  // at; a character is never anywhere it can't come back from.
   //
-  // Every chain has to terminate, and the digits are where that's easy to get
-  // wrong: shape-wise `b`→`6` and `6`→`b` are both honest, but together they're
-  // a cycle, and a cycle here is a character that never stops changing inside a
-  // rAF loop. The letters step toward the digits; the digits only ever step
-  // toward round shapes or straight to a stop. rotTerminates() proves it.
-  const ROT_CHAINS = {
-    a: 'oc.', b: '6o.', c: 'r.', d: 'cl.', e: 'cr.', f: 'r.', g: '9o.',
-    h: 'nr.', i: 'l.', j: 'i.', k: 'x.', l: '|.', m: 'nr.', n: 'r.',
-    o: 'c.', p: 'o.', q: 'g.', r: '.', s: '5.', t: 'fr.', u: 'v.',
-    v: '.', w: 'v.', x: '.', y: 'v.', z: '2.',
-    A: '4.', B: '8.', C: 'c.', D: 'O.', E: 'F.', F: 'r.', G: '6.',
-    H: 'n.', I: 'l.', J: 'i.', K: 'x.', L: '|.', M: 'nn.', N: 'n.',
-    O: '0.', P: 'F.', Q: 'O.', R: 'F.', S: '5.', T: 'r.', U: 'v.',
-    V: 'v.', W: 'v.', X: 'x.', Y: 'v.', Z: '2.',
-    '0': 'o.', '1': '|.', '2': '.', '3': '>.', '4': 'l.', '5': '.',
-    '6': 'o.', '7': '/.', '8': 'o.', '9': 'o.',
-  };
+  // Each group is a closed set and the groups don't overlap — a character has
+  // exactly one family it wobbles inside. The partition is what the test checks,
+  // since a glyph in two groups would flicker between families and read as the
+  // word changing rather than the letter twitching.
+  const ROT_GROUPS = [
+    'aoce0O',    // round and open
+    'il1|IjJ',   // thin strokes
+    'nmhr',      // an arch on a stem
+    'uvwyV',     // the V shapes
+    'bdpq69g',   // a bowl on a stem, in every rotation
+    't7f',       // crossed strokes
+    's5S', 'z2Z', '38B', '4A', 'MW', 'xX', 'kK', 'CG', 'EF', 'DQ',
+    'LT', 'NH', 'RP', 'UY',
+  ];
+
+  // ch -> the other glyphs in its group, precomputed. A character in no group
+  // (punctuation, emoji, anything non-Latin) maps to '' and simply never
+  // flickers, the same way it previously never decayed — rot on a line of CJK
+  // quietly does nothing rather than throwing inside a timer.
+  const ROT_VARIANTS = (function () {
+    const m = {};
+    for (const g of ROT_GROUPS) {
+      for (const ch of g) {
+        m[ch] = g.split('').filter((o) => o !== ch).join('');
+      }
+    }
+    return m;
+  })();
 
   /**
-   * One step of decay. Returns the next glyph along `ch`'s chain, or the same
-   * character if it has nowhere left to go ('.' and whitespace are terminal).
-   *
-   * Pure and total: an unmapped character (punctuation, emoji, anything
-   * non-Latin) is its own terminal state rather than an error, so rot applied to
-   * a line of CJK or a shrug emoticon quietly does nothing instead of throwing
-   * inside a rAF loop.
+   * The glyphs `ch` can flicker to, as a string, or '' if it has no lookalikes.
+   * Pure and total; never returns `ch` itself, so a swap is always visible.
    */
-  function rotNext(ch) {
-    const chain = ROT_CHAINS[ch];
-    if (chain) return chain[0];
-    // Mid-chain: find the character in the chain it belongs to and step along.
-    for (const k in ROT_CHAINS) {
-      const c = ROT_CHAINS[k];
-      const at = c.indexOf(ch);
-      if (at !== -1 && at < c.length - 1) return c[at + 1];
-    }
-    return ch;
-  }
-
-  // No chain is anywhere near this long; it's a backstop so a future edit that
-  // reintroduces a cycle degrades to a bounded walk instead of hanging.
-  const ROT_MAX_DEPTH = 12;
-
-  /**
-   * How many steps `ch` has left before it bottoms out. Used to size the
-   * effect's lifetime so it stops scheduling frames once everything is spent.
-   */
-  function rotDepth(ch) {
-    let n = 0;
-    let c = ch;
-    for (let i = 0; i < ROT_MAX_DEPTH; i++) {
-      const nx = rotNext(c);
-      if (nx === c) break;
-      c = nx; n++;
-    }
-    return n;
-  }
-
-  /**
-   * Does `ch` reach a terminal glyph without revisiting one? False means the
-   * chains contain a cycle, which the test asserts against for every character
-   * in the table — the failure mode is a rAF loop that never settles, and it's
-   * invisible until someone rots the one word that contains the bad letter.
-   */
-  function rotTerminates(ch) {
-    const seen = new Set();
-    let c = ch;
-    for (let i = 0; i < ROT_MAX_DEPTH; i++) {
-      if (seen.has(c)) return false;
-      seen.add(c);
-      const nx = rotNext(c);
-      if (nx === c) return true;
-      c = nx;
-    }
-    return false;
+  function rotVariants(ch) {
+    return ROT_VARIANTS[ch] || '';
   }
 
   // ---- confabulate: words that change behind you ----
@@ -565,7 +528,7 @@
     MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS,
     PALETTES, SIZES, parseArgs,
     WIND_STRENGTH, parseWind, planBurn,
-    ROT_CHAINS, rotNext, rotDepth, rotTerminates,
+    ROT_GROUPS, ROT_VARIANTS, rotVariants,
     CONFAB_PAIRS, planConfab, overwriteShift, mutableMask,
   };
 });

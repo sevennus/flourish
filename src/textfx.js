@@ -286,41 +286,66 @@
     // ---- the unreliable spans ----
 
     /*
-     * rot — characters decaying toward lookalikes, slowly, in place.
+     * rot — characters flickering between lookalikes, in place.
      *
-     * Scheduled with setTimeout rather than rAF, and that's the whole design:
-     * this effect is measured in tens of seconds and touches a character maybe
-     * four times in its life. A rAF loop would wake 60 times a second for
-     * ~30 seconds to do nothing, per span, forever — text has a shelf life here,
-     * so the spans don't end, they just run out of steps.
+     * Scheduled with setTimeout rather than rAF, and that's still the whole
+     * design: a character twitches a handful of times across the span's life and
+     * sits perfectly still between twitches, so a rAF loop would wake 60 times a
+     * second to do nothing. The spans don't end, they run out of twitches.
+     *
+     * A twitch is a there-and-back: the character flicks between its true glyph
+     * and a lookalike a few times, fast, and LANDS ON THE TRUTH. Two properties
+     * fall out of that, and both are the point:
+     *
+     *   Nothing is ever lost. This used to be a decay — each character stepped
+     *   down a chain toward '.' and dimmed toward the background as it went, so
+     *   a paragraph you came back to had crumbled. Now every character is either
+     *   correct or one beat away from being correct again, and rot never touches
+     *   colour at all. The text is unstable, not dying.
+     *
+     *   It settles. The flickering is bounded (TWITCHES per character), so a
+     *   span goes quiet on its own and the final state is exactly what was
+     *   written — which also means no timer outlives the effect, per span,
+     *   forever, in a transcript that only grows.
      */
     _rot(span, chars, args) {
       const F = window.Flourish;
       const mutable = this._mutable(chars);
-      const rest = restColor();
-      // Slower with `slow`, quicker with `fast` — the default is tuned so a
-      // paragraph looks untouched while you read it and wrong when you come back.
+      // Slower with `slow`, quicker with `fast`. Scales how OFTEN a character
+      // twitches, never how fast the flicker itself runs — the flick is quick
+      // because that's what makes it read as a glitch and not as a transition.
       const a = String(args || '').toLowerCase();
       const scale = a.includes('fast') ? 0.35 : (a.includes('slow') ? 2.4 : 1);
-      const FIRST = 4200 * scale;   // nothing moves while the reader is still on the line
-      const STEP = 3400 * scale;
+      const FIRST = 1600 * scale;   // let the reader land on the line first
+      const GAP = 2400 * scale;     // between one character's twitches
+      const FLICK = 70;             // one flick, there or back
+      const TWITCHES = 5;
 
       for (let i = 0; i < chars.length; i++) {
         if (!mutable.has(i)) continue;
         const c = chars[i];
-        let left = F.rotDepth(c.textContent);
-        if (!left) continue;
-        const tick = () => {
-          const next = F.rotNext(c.textContent);
-          if (next === c.textContent) return;       // spent
-          c.textContent = next;
-          // Each step dims a little toward ash. Colour only, never opacity: a
-          // rotted character is exactly as legible as the glyph it rotted into.
-          const k = 1 - left / (left + 1);
-          c.style.color = hex(mix(parseHex('#cfe9d8'), rest, Math.min(1, k + 0.25)));
-          if (--left > 0) setTimeout(tick, STEP + rand(-700, 700) * scale);
+        const truth = c.textContent;
+        const opts = F.rotVariants(truth);
+        if (!opts) continue;        // no lookalikes: leave it alone entirely
+        let left = TWITCHES;
+
+        const burst = () => {
+          let flicks = 3 + ((Math.random() * 4) | 0);
+          const flip = () => {
+            if (flicks-- <= 0) {
+              c.textContent = truth;    // always lands on what was written
+              if (--left > 0) setTimeout(burst, GAP + rand(0, GAP));
+              return;
+            }
+            c.textContent = c.textContent === truth
+              ? opts[(Math.random() * opts.length) | 0]
+              : truth;
+            setTimeout(flip, FLICK + rand(0, FLICK));
+          };
+          flip();
         };
-        setTimeout(tick, FIRST + rand(0, 2600) * scale);
+        // Stagger the start wide, so the line never twitches in unison.
+        setTimeout(burst, FIRST + rand(0, 5200) * scale);
       }
     }
 

@@ -102,10 +102,11 @@ per reply, and never on a fact, an instruction, a path, or a result.
 
 UNRELIABLE SPANS — these CHANGE THE TEXT after the reader has read it. Every
 other effect is honest: a glowing command is still the command. These are not.
-  {{fx:rot}}…{{/fx:rot}}                  characters decay toward lookalikes, slowly,
-                                          in place — text with a shelf life, something
-                                          that stops being what you wrote. Takes
-                                          slow/fast.
+  {{fx:rot}}…{{/fx:rot}}                  characters flicker between lookalikes and
+                                          back — o↔0, l↔1, b↔6. Never fades, never
+                                          settles anywhere but the truth: text that
+                                          won't sit still, not text that's dying.
+                                          Takes slow/fast.
   {{fx:confabulate}}…{{/fx:confabulate}}  words quietly turn over behind the reader:
                                           never↔always, you↔I, true↔false. Never
                                           announces. The reader's only evidence is

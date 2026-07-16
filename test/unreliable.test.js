@@ -5,9 +5,10 @@
  * tested here is mostly the ways they could misbehave rather than the ways they
  * look:
  *
- *   - rot's chains have to terminate. A cycle is a character that keeps
- *     changing forever inside a rAF loop, and it's invisible until someone rots
- *     the one word containing the bad letter.
+ *   - rot's groups have to partition. A glyph in two groups would flicker
+ *     between families, which reads as the word changing rather than as the
+ *     letter twitching, and it's invisible until someone rots the one word
+ *     containing the shared letter.
  *   - confabulate has to leave the sentence grammatical and has to be able to
  *     find its own way back — the effect is a reader who looks twice, so the
  *     table is walked in both directions.
@@ -60,38 +61,50 @@ test('intrusive carries its word through as args', () => {
 
 // ---------- rot ----------
 
-test('every rot chain terminates', () => {
-  // The whole table, plus every glyph that appears anywhere inside a chain —
-  // the mid-chain glyphs are the ones that don't get their own key and so are
-  // easiest to leave dangling in a loop.
-  const glyphs = new Set(Object.keys(F.ROT_CHAINS));
-  for (const k of Object.keys(F.ROT_CHAINS)) for (const c of F.ROT_CHAINS[k]) glyphs.add(c);
-  for (const g of glyphs) {
-    assert.ok(F.rotTerminates(g), `rot chain from '${g}' does not terminate`);
+test('rot groups partition — no glyph belongs to two families', () => {
+  const seen = new Map();
+  for (const g of F.ROT_GROUPS) {
+    for (const ch of g) {
+      assert.ok(!seen.has(ch), `'${ch}' is in both '${seen.get(ch)}' and '${g}'`);
+      seen.set(ch, g);
+    }
   }
 });
 
-test('rot bottoms out at a full stop, keeping the character box', () => {
-  for (const start of ['e', 'B', 'q', '8', 'M']) {
-    let c = start;
-    for (let i = 0; i < 12; i++) { const n = F.rotNext(c); if (n === c) break; c = n; }
-    assert.strictEqual(c, '.', `'${start}' rotted to '${c}', expected '.'`);
+test('rot never offers a character itself as a swap', () => {
+  // A swap that isn't visible is a twitch the reader never sees, and it burns
+  // one of the character's few twitches doing nothing.
+  for (const g of F.ROT_GROUPS) {
+    for (const ch of g) {
+      assert.ok(!F.rotVariants(ch).includes(ch), `'${ch}' can swap to itself`);
+      assert.strictEqual(F.rotVariants(ch).length, g.length - 1);
+    }
   }
 });
 
-test('rot leaves characters it has no chain for alone', () => {
-  // Punctuation, whitespace and anything non-Latin are their own terminal
-  // state: rot on a line of CJK should quietly do nothing, not throw.
+test('rot covers the letters English is actually made of', () => {
+  // The effect is meaningless on a paragraph if the common letters can't move.
+  for (const ch of 'etaoinsrhldcum') {
+    assert.ok(F.rotVariants(ch).length > 0, `'${ch}' has no lookalikes`);
+  }
+});
+
+test('rot leaves characters it has no group for alone', () => {
+  // Punctuation, whitespace and anything non-Latin have no lookalikes: rot on a
+  // line of CJK should quietly do nothing, not throw.
   for (const ch of [' ', '\n', '—', '好', '🙂', '.']) {
-    assert.strictEqual(F.rotNext(ch), ch);
-    assert.strictEqual(F.rotDepth(ch), 0);
+    assert.strictEqual(F.rotVariants(ch), '');
   }
 });
 
-test('rotDepth counts the steps actually available', () => {
-  assert.strictEqual(F.rotDepth('r'), 1);      // r → .
-  assert.strictEqual(F.rotDepth('e'), 3);      // e → c → r → .
-  assert.ok(F.rotDepth('a') > F.rotDepth('c')); // longer chains take longer to spend
+test('rot swaps stay inside the lookalike family', () => {
+  // The guarantee that makes this an unstable character rather than a different
+  // word: whatever a glyph flickers to, a reader could have misread it as.
+  assert.ok(F.rotVariants('o').includes('0'));
+  assert.ok(F.rotVariants('l').includes('1'));
+  assert.ok(F.rotVariants('b').includes('6'));
+  assert.ok(!F.rotVariants('o').includes('x'));
+  assert.ok(!F.rotVariants('e').includes('.'));   // nothing decays to punctuation now
 });
 
 // ---------- confabulate ----------

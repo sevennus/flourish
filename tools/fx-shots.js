@@ -82,7 +82,7 @@ const SHEET = [
   ['twin', 'two copies, drifting apart'],
   ['overwrite', 'a buffer with two writers'],
   ['palimpsest', 'what it said before, underneath'],
-  ['rot', 'LIES — decays toward lookalikes'],
+  ['rot', 'LIES — flickers between lookalikes and back'],
   ['confabulate', 'LIES — words turn over behind you'],
   ['intrusive', 'LIES — a word that was never said'],
 ];
@@ -268,20 +268,38 @@ async function run() {
   const textOf = (sel) => win.webContents.executeJavaScript(
     `(document.querySelector('${sel}') || {}).innerText || ''`);
 
-  console.log('rot (a sequence — the line should decay in place):');
+  // rot needs BOTH halves checked, and the old version of this harness only
+  // checked one. It compared the line before and after and called them being
+  // equal a dead effect — true when rot was a one-way decay, and exactly
+  // backwards now: rot always lands on the truth, so equal-at-the-end is the
+  // effect working. Sampling only the ends can no longer tell a working rot from
+  // one that never fired, so poll THROUGH the flicker and check the landing.
+  console.log('rot (the line should flicker between lookalikes and come back):');
   await reset();
-  await layout('rot', 'this line will not survive being read twice', 'fast');
-  const rotBefore = await textOf('.fx-rot');
+  await layout('rot', 'this line will not sit still while you read it', 'fast');
+  const rotTruth = await textOf('.fx-rot');
   await shoot(win, 'rot-1-fresh');
-  await wait(3000);
-  await shoot(win, 'rot-2-going');
-  await wait(5000);
-  await shoot(win, 'rot-3-spent');
-  const rotAfter = await textOf('.fx-rot');
-  console.log('    before:', JSON.stringify(rotBefore));
-  console.log('    after :', JSON.stringify(rotAfter));
-  if (rotBefore === rotAfter) console.log('  ! rot changed NOTHING — the effect is dead');
-  if (rotBefore.length !== rotAfter.length) console.log('  ! rot changed the LENGTH — the line will have reflowed');
+
+  const seen = new Set();
+  for (let i = 0; i < 40; i++) {
+    seen.add(await textOf('.fx-rot'));
+    if (i === 12) await shoot(win, 'rot-2-flickering');
+    await wait(250);
+  }
+  await wait(4000);                       // let every character spend its twitches
+  await shoot(win, 'rot-3-settled');
+  const rotSettled = await textOf('.fx-rot');
+
+  const wrongStates = [...seen].filter((s) => s !== rotTruth);
+  console.log('    truth   :', JSON.stringify(rotTruth));
+  console.log('    settled :', JSON.stringify(rotSettled));
+  console.log('    distinct wrong states seen mid-flicker:', wrongStates.length);
+  if (wrongStates[0]) console.log('    e.g.    :', JSON.stringify(wrongStates[0]));
+  if (!wrongStates.length) console.log('  ! rot never changed ANYTHING — the effect is dead');
+  if (rotSettled !== rotTruth) console.log('  ! rot did not come back — settled text is not what was written');
+  for (const s of seen) {
+    if (s.length !== rotTruth.length) { console.log('  ! rot changed the LENGTH — the line will have reflowed'); break; }
+  }
 
   console.log('confabulate (the words should turn over on their own):');
   await reset();
