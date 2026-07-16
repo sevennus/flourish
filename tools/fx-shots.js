@@ -27,13 +27,19 @@ const OUT = path.join(__dirname, '..', 'assets', 'fx');
 const POINT = [
   ['spark', 260], ['ripple', 420], ['pulse', 220], ['embers', 700],
   ['meteor', 620], ['confetti', 1200], ['fireworks', 480], ['vortex', 520],
-  ['lightning', 140], ['nova', 260], ['matrix', 700], ['glitch', 150],
+  // The one shot on this list with a real window rather than a floor, because
+  // the effect is now a sequence and only a slice of it has everything in it at
+  // once. 140ms was fine when the bolt was painted whole on frame one; too
+  // early now and it's a half-drawn leader with nothing alight, and past ~700ms
+  // every channel has decayed and it's a photograph of three burnt words and no
+  // lightning — which is what shipped in this file's first attempt. ~320ms is
+  // the overlap: all channels lit, all struck words burning. See
+  // tools/lightning-probe.js for the frame-by-frame this was picked from.
+  ['lightning', 320], ['nova', 260], ['matrix', 700], ['glitch', 150],
   ['shake', 140],
   // Slower ones need longer to become themselves: frost has to creep, the
   // constellation has to find its links, aurora has to fade up.
-  // apophenia draws its lines one at a time (210ms apart, up to 9), so it needs
-  // long enough to have made most of its argument.
-  ['aurora', 1500], ['constellation', 900], ['apophenia', 1900],
+  ['aurora', 1500], ['constellation', 900],
   ['shatter', 420], ['swarm', 1100],
   ['sonar', 700], ['warp', 480], ['frost', 1500], ['bloom', 1000],
   ['rain', 900], ['beam', 700], ['implode', 620],
@@ -154,42 +160,66 @@ async function run() {
   // prose and Jim saw nothing. It gets real prose and real anchors, and the
   // shot fails loudly rather than falling back.
   // Long enough to be a real reply. A four-line transcript is not a fair test:
-  // every link in it is near-horizontal because there's nowhere else to go, and
-  // a shot of that is a shot of a page shape Jim never sees.
+  // the anchor stratifier spreads its picks across LINES, so a short one gives
+  // it nothing to spread over and the shot shows a page shape Jim never sees.
   const PROSE =
-    'The deploy failed on Tuesday. Tuesday is also when the cache was warm. '
-    + 'Warm caches correlate with the mint palette, and mint was chosen the same '
-    + 'week the renderer died. Therefore the palette killed the deploy.\n\n'
-    + 'Latency rose after the schema change. The schema change shipped alongside '
-    + 'the new font. Fonts are rendered by the same GPU that runs the particle '
-    + 'canvas, and the particle canvas is what we added last month. So the '
-    + 'flourishes are slowing down the API, and always have been.\n\n'
-    + 'The build number is odd this week. Odd builds have historically been the '
-    + 'ones that break, and this one shipped on a Thursday, and Thursday is when '
-    + 'the tests were rewritten. The tests are therefore why the number is odd.\n\n'
-    + 'Every sentence above is asserted with exactly the same confidence as the '
-    + 'one before it, and none of them has anything to do with any other. That '
-    + 'is the entire point of the effect being demonstrated here.';
+    'The deploy went out at nine and the alert fired six minutes later, which '
+    + 'nobody noticed because that alert has cried wolf every morning since '
+    + 'April and muting it is the first thing anyone does on arriving.\n\n'
+    + 'By eleven the database had been read end to end twice and found blameless '
+    + 'both times, and the configuration change nobody wanted to look at was '
+    + 'still sitting there, small and reviewed by its own author.\n\n'
+    + 'The fix took four seconds once somebody asked the obvious question out '
+    + 'loud, which is the part of the timeline that always gets rounded off '
+    + 'before the postmortem reaches anyone senior enough to mind.\n\n'
+    + 'Every word on this page is a candidate. The bolt picks a few of them, and '
+    + 'the ones it hits are supposed to catch and burn while the rest of the '
+    + 'paragraph sits there and watches it happen.';
 
   const setTranscript = (html) => win.webContents.executeJavaScript(
     `document.getElementById('transcript').innerHTML = ${JSON.stringify(html)}; true;`);
   const PLAIN = '<div class="line system"><div class="body">✦ effect under test</div></div>';
 
+  // Effects whose input comes from OUTSIDE themselves: the renderer measures
+  // the words on screen and hands them in. Fired bare, o.anchors is undefined
+  // and they quietly take their no-anchors fallback — which is how this harness
+  // spent a whole release photographing a pretty fallback while the real
+  // apophenia drew a rule through the prose and Jim saw nothing.
+  //
+  // Lightning joined the list when it started striking words, and it would fail
+  // the same way: bare, it throws one bolt at the caret and sets nothing on
+  // fire, and the shot would be of a branch no reader ever reaches. Anything
+  // added here must fire the way applyEvents fires it, and fail LOUDLY rather
+  // than fall back.
+  const WORD_ANCHORED = new Set(['lightning']);
+
   console.log('point effects:');
   for (const [name, delay] of POINT) {
     await reset();
-    if (name === 'apophenia') { await setTranscript(`<div class="line assistant"><div class="body">${PROSE}</div></div>`); }
+    const anchored = WORD_ANCHORED.has(name);
+    if (anchored) { await setTranscript(`<div class="line assistant"><div class="body">${PROSE}</div></div>`); }
     await wait(160);
-    if (name === 'apophenia') {
+    // Reset AGAIN, immediately before firing. Several effects spawn part of
+    // themselves on a delayed timer, so the first reset empties the arrays and
+    // the previous effect's timer quietly refills them during the settle — and
+    // the shot ends up with the last effect's debris drifting through this
+    // one's frame. It went unnoticed for as long as it did because most delays
+    // here are long enough for the stowaway to have died before the shutter;
+    // lightning's is not.
+    await reset();
+    if (anchored) {
       await win.webContents.executeJavaScript(`
         (function () {
-          const a = window.Flourish.wordAnchors(14);
-          // The two ways this shot can lie about a working effect.
-          if (a.length < 3) throw new Error('fx-shots: wordAnchors returned ' + a.length
-            + ' anchors — this shot would be the fallback, not apophenia');
-          if (window.Flourish.anchorsFlat(a)) throw new Error('fx-shots: anchors are collinear'
-            + ' — this shot would be the fallback, and the real effect a line through the text');
-          window.__fx.fire('apophenia', 560, 330, { anchors: a, palette: 'violet' });
+          const a = window.Flourish.strikeTargets(4);
+          if (a.length < 2) throw new Error('fx-shots: wordAnchors returned ' + a.length
+            + ' anchors — this shot would be one bolt at the caret, not a strike on words');
+          if (a.filter(t => t.el).length < 2) throw new Error('fx-shots: only '
+            + a.filter(t => t.el).length + ' targets got claimed — this shot would show bolts'
+            + ' landing on words that never catch');
+          window.__fx.fire('lightning', 560, 330, {
+            anchors: a,
+            onStrike: (i) => window.Flourish.igniteWord(a[i]),
+          });
           return true;
         })();`);
     } else {
@@ -197,7 +227,7 @@ async function run() {
     }
     await wait(delay);
     await shoot(win, name);
-    if (name === 'apophenia') await setTranscript(PLAIN);
+    if (anchored) await setTranscript(PLAIN);
     await wait(200);
   }
   await reset();

@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const { FlourishParser, PER_CHAR_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, parseArgs } = window.Flourish;
+  const { FlourishParser, PER_CHAR_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS, parseArgs } = window.Flourish;
   const { AutoStyler } = window.AutoFX;
   const api = window.flourishAPI;
   const el = (id) => document.getElementById(id);
@@ -350,16 +350,107 @@
         // only excluded words above the top, which was harmless only because
         // it never looked far enough back to reach anything below.
         if (r.width === 0 || r.bottom < sr.top || r.top > sr.bottom) continue;
-        cand.push({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+        // node/start/end ride along so a caller can reach back for the word
+        // itself. Apophenia only ever needed the point; lightning has to set
+        // the thing on fire. effects.js never sees these — it gets the anchor
+        // list, hands back an index, and the DOM work happens here.
+        cand.push({
+          x: r.left + r.width / 2, y: r.top + r.height / 2,
+          node: nodes[i], start: m.index, end: m.index + m[0].length,
+        });
       }
     }
-    return window.Flourish.stratifyAnchors(cand, max);
+    const picked = window.Flourish.stratifyAnchors(cand, max);
+    picked.forEach((p, k) => { p.index = k; });
+    return picked;
   }
 
-  // Exposed for tools/fx-shots.js, which has to fire apophenia the way
-  // applyEvents does. It firing with no anchors at all is precisely why a
-  // broken effect shipped with a beautiful screenshot of its fallback path.
+  /*
+   * Claim each word a bolt is about to hit, NOW, while its offsets are still
+   * true.
+   *
+   * The obvious implementation stores {node, start, end} and resolves it when
+   * the strike lands. It doesn't work, and it fails silently, which is worse:
+   * igniting a word wraps part of its text node, which SPLITS that node — and
+   * lightning's four targets are almost always in one paragraph, so the first
+   * ignition invalidates the offsets of the other three. They then quietly
+   * resolve to nothing. The probe measured it exactly: four bolts, four
+   * strikes, one word on fire.
+   *
+   * So the wrapping happens up front and the strike only has to find an element
+   * that already exists. Within a node the words are wrapped back-to-front,
+   * because splitting at a later offset leaves every earlier offset untouched —
+   * which is the same aliasing problem, solved by doing the work in the one
+   * order where it cannot bite.
+   *
+   * Measurement happens before any of this (wordAnchors already ran), so the
+   * bolts are still aimed at where the words really were.
+   */
+  function prepareStrikes(anchors) {
+    const byNode = new Map();
+    for (const a of anchors) {
+      if (!a.node) continue;
+      if (!byNode.has(a.node)) byNode.set(a.node, []);
+      byNode.get(a.node).push(a);
+    }
+    for (const [node, list] of byNode) {
+      list.sort((p, q) => q.start - p.start);   // back-to-front: see above
+      for (const a of list) {
+        try {
+          const r = document.createRange();
+          r.setStart(node, a.start);
+          r.setEnd(node, a.end);
+          const span = document.createElement('span');
+          r.surroundContents(span);             // throws if the range straddles nodes
+          a.el = span;
+        } catch (e) { /* this word won't be struck. The others still will. */ }
+      }
+    }
+    return anchors;                             // order preserved: onStrike indexes into it
+  }
+
+  /*
+   * Set one struck word alight.
+   *
+   * burn already knows how to spread fire through characters, but only for a
+   * span whose children are per-character <i>s — the shape the renderer builds
+   * for an explicit {{fx:burn}}. prepareStrikes has already wrapped the word,
+   * so all that's left is to give it that shape and hand it over.
+   *
+   * Still defensive: the word was claimed when the bolt was aimed and the
+   * strike lands ~200ms later, and in between the transcript may have scrolled,
+   * re-rendered or been cleared. A strike that can't find its word does
+   * nothing, which is the correct amount of nothing.
+   */
+  function igniteWord(anchor) {
+    const span = anchor && anchor.el;
+    if (!span || !span.parentNode) return;
+    const word = span.textContent;
+    if (!word || span.firstElementChild) return;   // already burning
+    span.className = 'fx-burn';
+    span.textContent = '';
+    for (const ch of word) {
+      const i = document.createElement('i');
+      i.textContent = ch;
+      span.appendChild(i);
+    }
+    textFX.play('burn', span, '');
+  }
+
+  // Pick lightning's targets and claim them, in one call. It's one call on
+  // purpose: wordAnchors alone returns anchors that LOOK usable and silently
+  // ignite nothing, and a harness that assembles the two halves itself is a
+  // harness that can assemble them wrong while still producing a picture.
+  const strikeTargets = (n) => prepareStrikes(wordAnchors(n));
+
+  // Exposed for the shot harnesses, which have to fire the word-anchored
+  // effects the way applyEvents does. Firing them bare is precisely why a
+  // broken effect shipped with a beautiful screenshot of its fallback path —
+  // fx-shots photographed the branch nobody was looking at. A bare lightning
+  // would fail the same way: one bolt at the caret, nothing on fire.
   window.Flourish.wordAnchors = wordAnchors;
+  window.Flourish.strikeTargets = strikeTargets;
+  window.Flourish.igniteWord = igniteWord;
 
   // Effects the renderer handles itself rather than handing to the canvas.
   // Returns true if the caller should stop and let the pause happen.
@@ -374,6 +465,9 @@
       const ev = events[i];
       if (ev.t === 'text') appendText(ev.value);
       else if (ev.t === 'effect') {
+        // Retired, but still a directive: swallowed here so it leaves no trace
+        // on screen rather than leaking its own braces into the prose.
+        if (DISABLED_EFFECTS.has(ev.name)) continue;
         if (RENDERER_EFFECTS.has(ev.name)) {
           // Everything after the pause has to wait for it. The typewriter
           // reveals up to 14 characters a frame, so applying the rest of this
@@ -389,6 +483,13 @@
         const p = caretPos(target());
         const o = parseArgs(ev.args);
         if (ev.name === 'apophenia') o.anchors = wordAnchors(14);
+        if (ev.name === 'lightning') {
+          // Fewer than apophenia wanted: every one of these is a bolt, and a
+          // screen full of bolts is weather, not a strike.
+          const anchors = strikeTargets(4);
+          o.anchors = anchors;
+          o.onStrike = (i) => igniteWord(anchors[i]);
+        }
         effects.fire(ev.name, p.x, p.y, o);
       }
       else if (ev.t === 'style-start') openStyle(ev.name, ev.args);

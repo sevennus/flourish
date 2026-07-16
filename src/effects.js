@@ -30,6 +30,13 @@
     || ((pts) => !pts || pts.length < 3);
   const planApopheniaPairs = window.Flourish && window.Flourish.planApopheniaPairs;
 
+  // Lightning's geometry lives there too, and for the same reason.
+  const _boltPath = window.Flourish && window.Flourish.boltPath;
+  const _measure = window.Flourish && window.Flourish.measurePath;
+  const _forks = window.Flourish && window.Flourish.forkPaths;
+  const _leader = window.Flourish && window.Flourish.leaderStair;
+  const _revealAt = window.Flourish && window.Flourish.revealAt;
+
   // Named palettes, addressable from a directive: `{{fx:spark gold}}`.
   const PALETTES = {
     mint:   ['#35f0a0', '#7effc4', '#ffffff', '#37b6ff'],
@@ -434,39 +441,107 @@
     // A bolt from the top of the screen down to the caret, with branches,
     // an impact burst and a cold-white flash. Variants: single strike, forked
     // double strike, and a ground-up discharge.
+    /*
+     * Lightning: a stepped leader, then a return stroke.
+     *
+     * The old one interpolated a straight line from origin to target and
+     * jittered the points. Noise on a line is a noisy line — it can't be
+     * anything but a stick, because the structure it needs isn't in there at
+     * any scale. Real channels are self-similar, so the path is built by
+     * MIDPOINT DISPLACEMENT instead: take a segment, push its midpoint along
+     * the perpendicular, halve the push, recurse. Every level adds detail that
+     * looks like the level above it, which is the whole difference between
+     * lightning and a twig.
+     *
+     * Forks are the other half of the stick problem. The old branches were
+     * four-point random walks stapled on at random indices — so they read as
+     * separate debris rather than as the channel splitting. These leave a real
+     * point on the trunk, inherit the trunk's local heading, and are built by
+     * the same displacement at lower detail, so a fork is just a smaller bolt.
+     *
+     * And it GROWS, which the old one could not: nothing in it tracked a tip,
+     * so the draw loop painted the whole path from the first frame and only
+     * faded the alpha. Growth here is a STAIRCASE, not a ramp. A real leader
+     * advances in discrete jumps with dark pauses between them, and a smooth
+     * reveal reads as a wipe — the jumps are the erratic part, and the erratic
+     * part is what sells it. When the tip lands, the return stroke lights the
+     * whole channel at once. That flash IS the strike, and it's the instant the
+     * word underneath catches fire.
+     */
     _lightning(x, y, o) {
-      const v = variant(3);
-      const strikes = v === 1 ? 2 : 1;
-      for (let k = 0; k < strikes; k++) {
-        const fromBelow = v === 2;
-        const startX = x + rand(-140, 140) + k * rand(-90, 90);
-        const startY = fromBelow ? this.h + 10 : -10;
-        const segs = 16;
-        const pts = [{ x: startX, y: startY }];
-        for (let i = 1; i <= segs; i++) {
-          const t = i / segs;
-          pts.push({
-            x: startX + (x - startX) * t + rand(-30, 30) * (1 - t * 0.7),
-            y: startY + (y - startY) * t,
-          });
-        }
-        pts[pts.length - 1] = { x, y };
-
-        const branches = [];
-        for (let b = 0; b < 3; b++) {
-          const i = 3 + ((Math.random() * (segs - 5)) | 0);
-          const bp = [pts[i]];
-          let bx = pts[i].x, by = pts[i].y;
-          for (let n = 0; n < 4; n++) { bx += rand(-34, 34); by += rand(12, 38) * (fromBelow ? -1 : 1); bp.push({ x: bx, y: by }); }
-          branches.push(bp);
-        }
-        this.bolts.push({ pts, branches, life: 0, max: 420, delay: k * 110, color: o.pal ? _rgb(o.pal[0]) : null });
-      }
-      this._flash(o.pal ? `rgba(${_rgb(o.pal[0])},0.5)` : 'rgba(200,238,255,0.55)');
       const cols = o.pal || ICE;
-      for (let i = 0; i < 50 * o.scale; i++) {
-        const a = rand(-Math.PI, 0), sp = rand(1, 6) * o.scale;
-        this._dot(x, y, a, sp, cols, { vy: Math.sin(a) * sp * 0.6, max: rand(300, 700), size: rand(1, 3) * o.scale, grav: 0.08, drag: 0.97 });
+      const c = o.pal ? _rgb(o.pal[0]) : null;
+
+      // Strike real words, several per screen. The renderer hands their rects
+      // in via o.anchors — the same channel apophenia used, and the reason its
+      // geometry outlived it. With nothing on screen to hit, strike the caret,
+      // which is where every effect fires by default anyway.
+      const targets = (o.anchors && o.anchors.length)
+        ? o.anchors.slice(0, 2 + ((Math.random() * 3) | 0))
+        : [{ x, y }];
+
+      targets.forEach((t, k) => {
+        // Origins spread across the top so parallel bolts don't read as one
+        // fork, and the leader wanders more the further it has to travel.
+        const ox = t.x + rand(-200, 200);
+        const main = _measure(_boltPath(ox, -12, t.x, t.y, 0.30, 6));
+        const grow = rand(110, 210);          // fast: a leader is not a wipe
+        this.bolts.push({
+          main,
+          forks: _forks(main, 3 + ((Math.random() * 3) | 0), o.scale),
+          stair: _leader(7 + ((Math.random() * 6) | 0)),
+          target: t, index: t.index,
+          onStrike: o.onStrike || null,
+          struck: false,
+          grow, delay: k * rand(60, 190),
+          life: 0, max: grow + 520,
+          color: c,
+        });
+      });
+
+      // The sky lighting before anything has landed. The strike's own flash is
+      // fired per bolt, on impact, in _tick.
+      this._flash(c ? `rgba(${c},0.22)` : 'rgba(200,238,255,0.24)');
+      this._ensureRunning();
+      this._boltCols = cols;
+    }
+
+    /*
+     * Stroke `path` up to `reveal` of its arc length, interpolating the partial
+     * segment at the tip.
+     *
+     * Advancing by DISTANCE rather than by point index is what keeps the growth
+     * even: midpoint displacement leaves segments of wildly different lengths,
+     * so revealing a fixed number of points per frame would crawl through the
+     * detailed stretches and leap the smooth ones.
+     */
+    _strokeTo(ctx, path, reveal) {
+      const pts = path.pts, cum = path.cum;
+      const end = reveal * path.total;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        if (cum[i] <= end) { ctx.lineTo(pts[i].x, pts[i].y); continue; }
+        const seg = cum[i] - cum[i - 1] || 1;
+        const k = (end - cum[i - 1]) / seg;
+        ctx.lineTo(pts[i - 1].x + (pts[i].x - pts[i - 1].x) * k,
+                   pts[i - 1].y + (pts[i].y - pts[i - 1].y) * k);
+        break;
+      }
+      ctx.stroke();
+    }
+
+    // Sparks thrown off the point of impact. Fired on the return stroke rather
+    // than at t=0, so the debris belongs to the strike instead of preceding it.
+    _strikeBurst(x, y, o) {
+      const cols = this._boltCols || ICE;
+      const s = (o && o.scale) || 1;
+      for (let i = 0; i < 46 * s; i++) {
+        const a = rand(-Math.PI, 0), sp = rand(1, 7) * s;
+        this._dot(x, y, a, sp, cols, {
+          vy: Math.sin(a) * sp * 0.6, max: rand(300, 700),
+          size: rand(1, 3) * s, grav: 0.08, drag: 0.97,
+        });
       }
     }
 
@@ -1060,7 +1135,20 @@
       this.rings = rk;
 
       const bk = [];
-      for (const b of this.bolts) { b.life += dt; if (b.life < b.max + (b.delay || 0)) bk.push(b); }
+      for (const b of this.bolts) {
+        b.life += dt;
+        // The return stroke: the tip has reached the word. Everything the
+        // strike does — the flash, the sparks, the fire — hangs off this one
+        // moment rather than off the directive firing, because the directive
+        // fires while the leader is still somewhere up in the dark.
+        if (!b.struck && b.life - (b.delay || 0) >= b.grow) {
+          b.struck = true;
+          this._flash(b.color ? `rgba(${b.color},0.5)` : 'rgba(220,244,255,0.58)');
+          this._strikeBurst(b.target.x, b.target.y, { scale: 1 });
+          if (b.onStrike) { try { b.onStrike(b.index); } catch (e) { /* a burn that won't start must not take the frame loop with it */ } }
+        }
+        if (b.life < b.max + (b.delay || 0)) bk.push(b);
+      }
       this.bolts = bk;
 
       const sk = [];
@@ -1380,22 +1468,47 @@
       // Lightning: a wide soft pass under a bright core, flickering as it dies.
       for (const b of this.bolts) {
         if (b.delay && b.life < b.delay) continue;
-        const t = (b.life - (b.delay || 0)) / b.max;
-        const a = (1 - t) * (0.55 + Math.random() * 0.45);
+        const age = b.life - (b.delay || 0);
         const c = b.color || '190,235,255';
+
+        // Two acts. Growing: the leader is dim, flickery and partial — it's
+        // feeling its way down and hasn't connected to anything. Struck: the
+        // return stroke lights the finished channel hard and lets it decay.
+        const growing = age < b.grow;
+        const reveal = growing ? _revealAt(b.stair, age / b.grow) : 1;
+        if (reveal <= 0) continue;
+
+        let a, wide;
+        if (growing) {
+          a = 0.30 + Math.random() * 0.22;   // per-frame flicker: unsteady, unfinished
+          wide = 0.55;
+        } else {
+          const decay = (age - b.grow) / (b.max - b.grow);
+          a = Math.max(0, 1 - decay) * (0.82 + Math.random() * 0.18);
+          wide = 1;
+        }
+
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        for (const pass of [{ w: 9, c: `rgba(${c},${a * 0.28})` }, { w: 3.5, c: `rgba(${c},${a * 0.7})` }, { w: 1.4, c: `rgba(255,255,255,${a})` }]) {
-          ctx.strokeStyle = pass.c; ctx.lineWidth = pass.w;
-          ctx.beginPath();
-          b.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-          ctx.stroke();
-          ctx.lineWidth = pass.w * 0.5;
-          for (const br of b.branches) {
-            ctx.beginPath();
-            br.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-            ctx.stroke();
+        const passes = [
+          { w: 9 * wide, c: `rgba(${c},${a * 0.26})` },
+          { w: 3.5 * wide, c: `rgba(${c},${a * 0.7})` },
+          { w: 1.4 * wide, c: `rgba(255,255,255,${a})` },
+        ];
+        for (const pass of passes) {
+          ctx.strokeStyle = pass.c;
+          ctx.lineWidth = pass.w;
+          this._strokeTo(ctx, b.main, reveal);
+          // A fork stays dark until the tip has actually passed the point it
+          // leaves from, and then runs on its own clock — so the channel opens
+          // out as it descends instead of arriving pre-branched.
+          for (const fk of b.forks) {
+            if (reveal < fk.at) continue;
+            const fr = growing ? Math.min(1, (reveal - fk.at) / 0.18) : 1;
+            if (fr <= 0) continue;
+            ctx.lineWidth = pass.w * fk.w;
+            this._strokeTo(ctx, fk, fr);
           }
         }
         ctx.restore();

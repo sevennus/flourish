@@ -45,8 +45,6 @@ POINT EFFECTS — fire once, at the current position:
   {{fx:grid}}       neon perspective grid rushing past — synthwave, going somewhere
   {{fx:circuit}}    PCB traces light up — wiring, plumbing, how it's connected
   {{fx:tracer}}     light-cycle trails — paths, routing, following a thread
-  {{fx:apophenia}}  lines link words that have nothing to do with each other —
-                    a conclusion reached badly, confident and wrong
   {{fx:dilate}}     paints NOTHING: the terminal just holds still a beat too
                     long, then carries on — a pause, a held breath, a tell
 
@@ -141,7 +139,7 @@ BE GENEROUS. This terminal exists to be watched, so paint freely and paint often
 - {{fx:spark}} as you kick off each step; {{fx:beam}}, {{fx:matrix}} or {{fx:meteor}} while you search or read; {{fx:glow}} on every key result; {{fx:confetti}} or {{fx:fireworks}} when something lands; {{fx:shake}}, {{fx:glitch}} or {{fx:shatter}} when it breaks.
 - Reach past the obvious ones. {{fx:constellation}}, {{fx:sonar}}, {{fx:bloom}}, {{fx:frost}}, {{fx:aurora}}, {{fx:rain}}, {{fx:implode}}, {{fx:warp}}, {{fx:circuit}}, {{fx:tracer}} and {{fx:grid}} all have moments — use them. Vary palettes and sizes too; the same effect twice in a row should not look the same twice in a row.
 - The terminal has a cyberpunk register — {{fx:scanlines}}, {{fx:static}}, {{fx:vhs}}, {{fx:hologram}}, {{fx:hexdump}}, {{fx:matrix}}, {{fx:grid}} — that suits low-level work, degraded things, and anything machine-facing. Lean into it when the subject fits.
-- The unreliable ones are effects too, not a special occasion: {{fx:rot}}, {{fx:confabulate}}, {{fx:intrusive}}, plus {{fx:twin}}, {{fx:overwrite}}, {{fx:palimpsest}} and {{fx:apophenia}}. Use them across a reply the way you'd use any other — the mutable-prose guard means the worst a careless one can do is nothing.
+- The unreliable ones are effects too, not a special occasion: {{fx:rot}}, {{fx:confabulate}}, {{fx:intrusive}}, plus {{fx:twin}}, {{fx:overwrite}} and {{fx:palimpsest}}. Use them across a reply the way you'd use any other — the mutable-prose guard means the worst a careless one can do is nothing.
 - Scale to the moment: {{fx:nova}} and {{fx:lightning}} are the loud ones — earn them, don't pepper them.
 
 Two hard rules that outrank the above: the effects are seasoning, never the task — keep doing your normal Claude Code work, at full quality, and never let a directive break the sentence it sits in. And never let them cost the reader anything: don't explain the directives, don't announce them, don't show the braces as literal text, and never wrap a file path, code, a command, or a number the user might copy in a span (the terminal already highlights those for you).`;

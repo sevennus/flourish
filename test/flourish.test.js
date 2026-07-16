@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const {
   FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, PALETTES, SIZES, parseArgs,
+  DISABLED_EFFECTS,
 } = require('../src/flourish');
 const { pickDemoResponse, SHOWCASE, RESPONSES } = require('../src/demo');
 const { FLOURISH_SYSTEM_PROMPT } = require('../src/prompt');
@@ -272,12 +273,28 @@ test('the tool-to-effect map only names real effects and palettes', () => {
 });
 
 test('the system prompt teaches exactly the vocabulary the parser accepts', () => {
+  // Retirement splits what the parser ACCEPTS from what the model is TOLD, and
+  // the split has to go one way only. A retired effect stays in the parser so
+  // its directive is still stripped from the stream — drop it and any stray
+  // {{fx:apophenia}} in an old transcript prints its own braces on screen — but
+  // it leaves the prompt so the model stops reaching for it.
   const taught = new Set([...FLOURISH_SYSTEM_PROMPT.matchAll(/\{\{fx:([a-z]+)/g)].map((m) => m[1]));
   for (const n of [...POINT_EFFECTS, ...STYLE_SPANS]) {
+    if (DISABLED_EFFECTS.has(n)) {
+      assert.ok(!taught.has(n), `${n} is retired but prompt.js still teaches it`);
+      continue;
+    }
     assert.ok(taught.has(n), `prompt.js never teaches ${n}, so the model will never fire it`);
   }
   for (const n of taught) {
     assert.ok(POINT_EFFECTS.has(n) || STYLE_SPANS.has(n), `prompt.js teaches unknown effect ${n}`);
+  }
+});
+
+test('a retired effect is still parsed, so it never leaks onto the screen', () => {
+  for (const n of DISABLED_EFFECTS) {
+    assert.ok(POINT_EFFECTS.has(n) || STYLE_SPANS.has(n),
+      `${n} is disabled by removal, which prints its braces instead of hiding them`);
   }
 });
 

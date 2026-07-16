@@ -55,6 +55,26 @@
     'apophenia', 'dilate',
   ]);
 
+  // Effects that still parse but no longer paint.
+  //
+  // apophenia is retired. It shipped drawing a straight rule through the prose
+  // instead of a web, its sampling guaranteed that by construction, and the
+  // screenshot that passed review was of its own fallback path. It was fixed
+  // (f3eedff), seen working, and turned down on the merits — a fair trial and a
+  // real verdict.
+  //
+  // Retired rather than deleted, for two reasons. Its anchor geometry —
+  // anchorsFlat, stratifyAnchors, wordAnchors — is the only code here that
+  // hangs an effect off real words, and lightning now depends on all of it;
+  // keeping apophenia's tests alive keeps that machinery honest. And a name
+  // that still PARSES is a name that gets stripped from the stream: drop it
+  // from the vocabulary instead, and any stray `{{fx:apophenia}}` in an old
+  // transcript starts printing itself on screen as literal braces.
+  //
+  // So it resolves, and the renderer drops it on the floor. To bring it back,
+  // take it out of this set and restore its line in prompt.js.
+  const DISABLED_EFFECTS = new Set(['apophenia']);
+
   // dilate paints nothing. It's here because it fires like a point effect and
   // the model names it like one, but the renderer intercepts it before the
   // engine ever sees it: the whole effect is the typewriter holding still for a
@@ -411,12 +431,56 @@
     return (max == null ? 0.62 : max) * k * k;   // quadratic: slow start, tight finish
   }
 
-  // A directive can't be longer than this; if we buffer `{{` and never find a
-  // closing `}}` within this many chars, we give up and flush it as literal
-  // text. Keeps a stray `{{` in normal prose from swallowing the whole reply.
-  const MAX_TOKEN_LEN = 64;
+  // ---- what a buffered `{{…` is allowed to grow into ----
+  //
+  // Once we've seen `{{` we buffer, waiting for `}}`. Something has to stop a
+  // stray brace in ordinary prose from swallowing the rest of the reply, and
+  // that used to be a flat 64-character cap: no `}}` within 64 chars, flush the
+  // lot as literal text.
+  //
+  // That length was sized for directives shaped like `{{fx:swarm violet lg}}`,
+  // and it silently broke the one effect whose args are a sentence rather than
+  // a keyword. `{{fx:palimpsest ` spends 18 characters before the old text even
+  // starts, so any palimpsest carrying more than 46 characters of args blew the
+  // cap and landed on screen as literal braces. The only palimpsest example in
+  // the repo (demo.js) is 49 characters and cleared it, so every test passed.
+  //
+  // So check the SHAPE instead of counting characters. Everything ahead of the
+  // args is a closed vocabulary — `{{fx:` or `{{/fx:`, then a name — so a
+  // candidate can be rejected the moment it stops looking like one, which is
+  // both stricter than the cap where it matters (a stray `{{` in prose now dies
+  // in three characters instead of sixty-four) and unbounded where it should be
+  // (args run as long as the sentence needs).
+  //
+  // A name that's still being typed is left alone rather than matched against
+  // the vocabulary, so a typo'd `{{fx:shimer}}` still reaches _resolve and gets
+  // emitted whole as literal text, exactly as it always did.
+  const MAX_NAME_LEN = 16;      // 'constellation' is the longest real one, at 13
+  const MAX_DIRECTIVE_LEN = 512; // backstop for an opening tag that never closes
 
   const ALL_NAMES = new Set([...POINT_EFFECTS, ...STYLE_SPANS]);
+
+  /**
+   * Could `buf` still become a directive? `buf` starts with `{{` and does not
+   * yet contain `}}`. False only when no further character could rescue it, so
+   * the caller can stop buffering and flush it as literal text.
+   */
+  function plausibleDirective(buf) {
+    if (buf.length > MAX_DIRECTIVE_LEN) return false;
+
+    // A single trailing `}` is the first half of the `}}` we're waiting for,
+    // not part of the name.
+    const probe = buf.replace(/\}+$/, '');
+    const prefix = probe[2] === '/' ? '{{/fx:' : '{{fx:';
+    if (probe.length < prefix.length) return prefix.startsWith(probe);
+    if (!probe.startsWith(prefix)) return false;
+
+    const rest = probe.slice(prefix.length);
+    const sp = rest.indexOf(' ');
+    const name = sp === -1 ? rest : rest.slice(0, sp);
+    // Args are free text and checked by nobody; the name is not.
+    return /^[A-Za-z]*$/.test(name) && name.length <= MAX_NAME_LEN;
+  }
 
   class FlourishParser {
     constructor() {
@@ -475,8 +539,9 @@
           else out.push({ t: 'text', value: this.buf }); // not a real directive
           this.buf = '';
           this.inToken = false;
-        } else if (this.buf.length > MAX_TOKEN_LEN) {
-          // Too long to be a directive — flush what we buffered as literal.
+        } else if (!plausibleDirective(this.buf)) {
+          // It has stopped looking like a directive and no later character can
+          // change that — flush what we buffered as literal.
           flushPlain();
           out.push({ t: 'text', value: this.buf });
           this.buf = '';
@@ -625,13 +690,135 @@
     return pairs;
   }
 
+  // ---------- lightning geometry ----------
+  //
+  // Pure, and here rather than in effects.js for exactly the reason apophenia's
+  // anchor rules are: that effect shipped drawing the wrong shape entirely, no
+  // DOM-free test could see it, and the screenshot that passed review was of
+  // its fallback. Geometry that can be checked by `node --test` is geometry
+  // that can be wrong out loud. `rnd` is injectable throughout so a test can
+  // pin the shape.
+
+  // Each subdivision displaces by this fraction of the last one. Below ~0.5 the
+  // detail dies out before it's visible and the path straightens back into the
+  // stick this replaced; above it, the fine detail is as violent as the coarse
+  // and the channel reads as scribble. Self-similarity is the whole trick, and
+  // it lives in this one number.
+  const BOLT_FALLOFF = 0.52;
+
+  /**
+   * A lightning channel from (ax,ay) to (bx,by) by midpoint displacement:
+   * subdivide each segment, push the new midpoint along its perpendicular,
+   * halve the push, recurse. Returns a polyline.
+   *
+   * The endpoints are never displaced — only midpoints move — so the bolt
+   * always starts where it was aimed and lands exactly on its target. That
+   * matters: the target is a word, and a strike that misses the word it set on
+   * fire is worse than no strike.
+   */
+  function boltPath(ax, ay, bx, by, rough, detail, rnd) {
+    const random = rnd || Math.random;
+    let pts = [{ x: ax, y: ay }, { x: bx, y: by }];
+    let off = Math.hypot(bx - ax, by - ay) * (rough == null ? 0.3 : rough);
+    for (let d = 0; d < (detail | 0); d++) {
+      const next = [pts[0]];
+      for (let i = 1; i < pts.length; i++) {
+        const p = pts[i - 1], q = pts[i];
+        const dx = q.x - p.x, dy = q.y - p.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const k = (random() * 2 - 1) * off;
+        // (-dy, dx)/len is the unit perpendicular; the midpoint rides it.
+        next.push({ x: (p.x + q.x) / 2 - (dy / len) * k, y: (p.y + q.y) / 2 + (dx / len) * k });
+        next.push(q);
+      }
+      pts = next;
+      off *= BOLT_FALLOFF;
+    }
+    return pts;
+  }
+
+  /** Arc-length table for a polyline, so growth can advance by distance. */
+  function measurePath(pts) {
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) {
+      cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+    }
+    return { pts, cum, total: cum[cum.length - 1] || 1 };
+  }
+
+  /**
+   * Forks off a measured trunk. Each leaves a real point on the trunk and
+   * inherits the trunk's heading there, turned by a third to a full radian —
+   * so a fork is a smaller bolt continuing the channel's argument, rather than
+   * the random walk stapled on at a random index that the old one used.
+   *
+   * `at` is where along the trunk it leaves, as a fraction, so it can be held
+   * dark until the tip has actually got there.
+   */
+  function forkPaths(main, n, scale, rnd) {
+    const random = rnd || Math.random;
+    const out = [];
+    if (!main || main.pts.length < 6) return out;
+    for (let f = 0; f < n; f++) {
+      const i = 2 + ((random() * (main.pts.length - 4)) | 0);
+      const p = main.pts[i], prev = main.pts[i - 1];
+      const heading = Math.atan2(p.y - prev.y, p.x - prev.x);
+      const a = heading + (0.35 + random() * 0.5) * (random() < 0.5 ? 1 : -1);
+      const len = (34 + random() * 70) * (scale || 1);
+      const path = measurePath(
+        boltPath(p.x, p.y, p.x + Math.cos(a) * len, p.y + Math.sin(a) * len, 0.24, 3, rnd)
+      );
+      path.at = main.cum[i] / main.total;
+      path.w = 0.4 + random() * 0.3;
+      out.push(path);
+    }
+    return out;
+  }
+
+  /**
+   * The stepped leader's advance: a staircase of {t, len}, both normalised to
+   * 0..1 and both monotonic.
+   *
+   * A real leader jumps, holds dark, jumps again — it does not ease. Growth on
+   * a ramp reads as a wipe pulling a picture across the screen, which is the
+   * opposite of the thing. Both axes are uneven on purpose: even jumps at even
+   * intervals read as a progress bar, which is worse than a wipe.
+   *
+   * The last step lands at exactly t=1, so the channel completes on the same
+   * frame the return stroke fires rather than a beat before it.
+   */
+  function leaderStair(steps, rnd) {
+    const random = rnd || Math.random;
+    const n = Math.max(2, steps | 0);
+    const out = [];
+    let len = 0, t = 0;
+    for (let i = 0; i < n; i++) {
+      len += 0.35 + random();
+      t += 0.35 + random();
+      out.push({ t, len });
+    }
+    const T = out[n - 1].t, L = out[n - 1].len;
+    return out.map((s) => ({ t: s.t / T, len: s.len / L }));
+  }
+
+  /** How much of the channel is lit at normalised time `t`. A step function. */
+  function revealAt(stair, t) {
+    if (t >= 1) return 1;
+    if (t <= 0 || !stair || !stair.length) return 0;
+    let r = 0;
+    for (const s of stair) { if (s.t > t) break; r = s.len; }
+    return r;
+  }
+
   return {
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
-    MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS,
+    MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS,
     PALETTES, SIZES, parseArgs,
     WIND_STRENGTH, parseWind, planBurn,
     ROT_GROUPS, ROT_VARIANTS, rotVariants,
     CONFAB_PAIRS, planConfab, overwriteShift, mutableMask,
+    plausibleDirective, MAX_DIRECTIVE_LEN,
+    BOLT_FALLOFF, boltPath, measurePath, forkPaths, leaderStair, revealAt,
     ANCHOR_MIN_SPREAD, MIN_SLOPE, anchorsFlat, stratifyAnchors,
     pairShallow, planApopheniaPairs,
   };

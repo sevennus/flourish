@@ -287,3 +287,203 @@ test('overwrite closes up as it goes and never reverses', () => {
 test('overwrite is a no-op on a single character', () => {
   assert.strictEqual(F.overwriteShift(0, 1), 0);
 });
+
+// ---------- the tokenizer's tolerance for long args ----------
+//
+// palimpsest is the only span whose args are a sentence rather than a keyword,
+// so it's the only one that can outgrow the buffer the parser is willing to
+// keep. It did: a flat 64-char cap left 46 characters for the old text, and
+// anything longer arrived on screen as literal braces. The example in demo.js
+// is 49 characters, so it cleared the cap and every test passed.
+
+const parse = (s) => { const p = new F.FlourishParser(); return [...p.feed(s), ...p.flush()]; };
+const leaks = (s) => parse(s).some((e) => e.t === 'text' && e.value.includes('{{fx:'));
+
+test('palimpsest survives args longer than a keyword', () => {
+  const old = 'we took it down for six hours because I skipped the staging step';
+  const src = `{{fx:palimpsest ${old}}}a change reduced availability{{/fx:palimpsest}}`;
+  assert.ok(src.indexOf('}}') + 2 > 64, 'this test is pointless if the tag is short');
+
+  const evs = parse(src);
+  assert.ok(!leaks(src), 'the directive leaked onto the screen as literal text');
+  const start = evs.find((e) => e.t === 'style-start');
+  assert.strictEqual(start.name, 'palimpsest');
+  assert.strictEqual(start.args, old, 'the old text must survive the trip intact');
+});
+
+test('every span that takes free-text args accepts a full sentence', () => {
+  const sentence = 'a sentence long enough that no one would call it a keyword, twice over';
+  for (const [name, src] of [
+    ['palimpsest', `{{fx:palimpsest ${sentence}}}new{{/fx:palimpsest}}`],
+    ['intrusive', `{{fx:intrusive ${sentence}}}text{{/fx:intrusive}}`],
+  ]) {
+    assert.ok(!leaks(src), `${name} leaked with a sentence of args`);
+  }
+});
+
+test('a stray brace in prose is rejected faster than the old cap allowed', () => {
+  // The reason a cap existed at all. It must still hold — and now it should
+  // give up long before it has eaten 64 characters of the reader's sentence.
+  for (const s of ['{{ hello there', '{{not a directive at all', '{{/nope']) {
+    assert.ok(!F.plausibleDirective(s), `kept buffering: ${s}`);
+  }
+  assert.ok(!F.plausibleDirective('{{ '), 'three characters is enough to know');
+
+  const src = 'a stray {{ in prose must not swallow the rest of the reply';
+  const text = parse(src).filter((e) => e.t === 'text').map((e) => e.value).join('');
+  assert.strictEqual(text, src, 'literal text must round-trip unchanged');
+});
+
+test('a directive still being typed is not rejected early', () => {
+  for (const s of ['{{', '{{f', '{{fx:', '{{fx:glow', '{{fx:glow}', '{{/', '{{/fx:pal']) {
+    assert.ok(F.plausibleDirective(s), `gave up too early on: ${s}`);
+  }
+});
+
+test('a typo\'d name still lands as literal text, whole', () => {
+  // Names are checked in _resolve, not while buffering, so a misspelling comes
+  // through in one piece rather than in fragments.
+  const evs = parse('{{fx:shimer}}');
+  assert.deepStrictEqual(evs, [{ t: 'text', value: '{{fx:shimer}}' }]);
+});
+
+test('an opening tag that never closes is still bounded', () => {
+  // Only the BUFFER is bounded. Text that has already been ruled out as a
+  // directive is ordinary prose and streams through unbuffered, however long
+  // it runs — so the assertion is about the first event, not all of them.
+  const src = '{{fx:palimpsest ' + 'x'.repeat(F.MAX_DIRECTIVE_LEN * 2);
+  const evs = parse(src);
+  assert.strictEqual(evs[0].t, 'text', 'the runaway buffer must be flushed as text');
+  assert.ok(evs[0].value.startsWith('{{fx:palimpsest'), 'the first event is the buffer');
+  assert.ok(evs[0].value.length <= F.MAX_DIRECTIVE_LEN + 1, 'buffered past the backstop');
+  assert.strictEqual(evs.map((e) => e.value).join(''), src, 'nothing may be dropped');
+});
+
+// ---------- lightning geometry ----------
+//
+// The old bolt was a straight line with noise on it, drawn whole from the first
+// frame. Both defects were visible in every screenshot ever taken of it and
+// nobody looked, which is the same way apophenia's straight rule survived — so
+// the replacement's geometry is pure and its properties are asserted here
+// rather than left to the eye.
+
+// A pinned PRNG: the shape must be checkable, not just plausible.
+const seeded = (n) => { let s = n; return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; };
+
+test('a bolt lands exactly where it was aimed', () => {
+  // The target is a word that is about to catch fire. A bolt that misses the
+  // word it ignites is worse than no bolt.
+  for (let i = 0; i < 20; i++) {
+    const pts = F.boltPath(10, -12, 400, 300, 0.3, 6, seeded(i + 1));
+    assert.deepStrictEqual(pts[0], { x: 10, y: -12 }, 'origin moved');
+    assert.deepStrictEqual(pts[pts.length - 1], { x: 400, y: 300 }, 'bolt missed its target');
+  }
+});
+
+test('subdivision is self-similar, not merely noisy', () => {
+  // The stick was a line plus uniform jitter: detail at one scale only. Each
+  // level here must contribute strictly less deviation than the one above it,
+  // which is what makes the channel read as lightning at every zoom.
+  const spread = (detail) => {
+    const pts = F.boltPath(0, 0, 0, 600, 0.3, detail, seeded(7));
+    return Math.max(...pts.map((p) => Math.abs(p.x)));
+  };
+  let prev = 0;
+  const deltas = [];
+  for (let d = 1; d <= 6; d++) { const s = spread(d); deltas.push(s - prev); prev = s; }
+  // Later levels may add nothing (a midpoint can be pushed back inward), but
+  // none may add MORE than the coarsest did — that would be scribble.
+  for (const d of deltas.slice(1)) {
+    assert.ok(d <= deltas[0] + 1e-9, 'a fine level displaced more than the coarse one');
+  }
+  assert.ok(F.BOLT_FALLOFF > 0.5 && F.BOLT_FALLOFF < 0.6, 'falloff outside the band that reads as lightning');
+});
+
+test('detail adds points without wandering off the page', () => {
+  const pts = F.boltPath(300, 0, 300, 500, 0.3, 6, seeded(3));
+  assert.strictEqual(pts.length, 2 ** 6 + 1, 'subdivision dropped points');
+  const off = Math.max(...pts.map((p) => Math.abs(p.x - 300)));
+  assert.ok(off < 500 * 0.3 * 2, `bolt wandered ${off.toFixed(0)}px off its axis`);
+});
+
+test('the leader is a staircase, not a ramp', () => {
+  // The whole point of "erratic". An even advance is a progress bar; a smooth
+  // one is a wipe. Neither is lightning.
+  const stair = F.leaderStair(10, seeded(11));
+  assert.strictEqual(stair[stair.length - 1].t, 1, 'the last step must land on the strike');
+  assert.strictEqual(stair[stair.length - 1].len, 1, 'the channel must finish complete');
+  for (let i = 1; i < stair.length; i++) {
+    assert.ok(stair[i].t > stair[i - 1].t, 'time went backwards');
+    assert.ok(stair[i].len > stair[i - 1].len, 'the leader retreated');
+  }
+  // Jumps must be uneven — that is the erratic part, and it is testable.
+  const jumps = stair.map((s, i) => s.len - (i ? stair[i - 1].len : 0));
+  const mean = jumps.reduce((a, b) => a + b) / jumps.length;
+  const spread = Math.max(...jumps) / Math.min(...jumps);
+  assert.ok(spread > 1.5, `jumps too even (${spread.toFixed(2)}×) — reads as a progress bar`);
+  assert.ok(mean > 0);
+});
+
+test('reveal holds still between steps', () => {
+  // The dark pause between jumps is not a gap in the animation, it IS the
+  // animation. If reveal moves every frame, the staircase was a ramp.
+  const stair = F.leaderStair(8, seeded(5));
+  const seen = new Set();
+  for (let t = 0; t < 1; t += 0.01) seen.add(F.revealAt(stair, t).toFixed(6));
+  assert.ok(seen.size <= 9, `reveal took ${seen.size} distinct values across 8 steps — it is ramping`);
+  assert.strictEqual(F.revealAt(stair, 1), 1);
+  assert.strictEqual(F.revealAt(stair, 0), 0, 'the channel must start dark');
+});
+
+test('reveal never goes backwards', () => {
+  const stair = F.leaderStair(12, seeded(9));
+  let prev = -1;
+  for (let t = 0; t <= 1.2; t += 0.005) {
+    const r = F.revealAt(stair, t);
+    assert.ok(r >= prev, `reveal retreated at t=${t.toFixed(3)}`);
+    prev = r;
+  }
+});
+
+test('forks leave the trunk at a real point and inherit its heading', () => {
+  const main = F.measurePath(F.boltPath(300, 0, 300, 500, 0.3, 6, seeded(2)));
+  const forks = F.forkPaths(main, 5, 1, seeded(4));
+  assert.strictEqual(forks.length, 5);
+  for (const f of forks) {
+    assert.ok(f.at >= 0 && f.at <= 1, 'fork point is off the trunk');
+    const root = f.pts[0];
+    const onTrunk = main.pts.some((p) => Math.hypot(p.x - root.x, p.y - root.y) < 1e-6);
+    assert.ok(onTrunk, 'a fork started somewhere the trunk never went');
+    assert.ok(f.w < 1, 'a fork must be thinner than the trunk it leaves');
+  }
+});
+
+test('arc length is measured, so growth advances by distance', () => {
+  // Midpoint displacement leaves segments of wildly uneven length. Revealing by
+  // point index would crawl the detailed stretches and leap the smooth ones.
+  const path = F.measurePath([{ x: 0, y: 0 }, { x: 3, y: 4 }, { x: 3, y: 14 }]);
+  assert.strictEqual(path.total, 15);
+  assert.deepStrictEqual(path.cum, [0, 5, 15]);
+});
+
+test('measure never divides by zero on a degenerate path', () => {
+  assert.strictEqual(F.measurePath([{ x: 5, y: 5 }]).total, 1);
+});
+
+// ---------- apophenia, retired ----------
+
+test('apophenia still parses so it cannot leak braces onto the screen', () => {
+  const p = new F.FlourishParser();
+  const evs = [...p.feed('{{fx:apophenia}}'), ...p.flush()];
+  assert.deepStrictEqual(evs, [{ t: 'effect', name: 'apophenia', args: '' }],
+    'a retired name must still resolve — dropping it from the vocabulary prints it instead');
+});
+
+test('apophenia is disabled but its geometry stays under test', () => {
+  assert.ok(F.DISABLED_EFFECTS.has('apophenia'), 'apophenia should be retired');
+  assert.ok(F.POINT_EFFECTS.has('apophenia'), 'it must stay in the vocabulary to be stripped');
+  // The machinery lightning inherited. If this ever goes, lightning loses its
+  // ability to strike words at all.
+  assert.strictEqual(typeof F.stratifyAnchors, 'function');
+  assert.strictEqual(typeof F.anchorsFlat, 'function');
+});
