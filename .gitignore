@@ -11,4 +11,9 @@ flourish-screenshot.png
 src/build-info.js
 build-info.json
 
+# Written by server.js at runtime (cwd/model/demoMode). Machine state, not
+# source — and if it were tracked, every settings change would mark the build
+# dirty and the stamp's "+" would stop meaning anything.
+.flourish-config.json
+
 # Saved SSH settings live in Electron's userData dir, not here — nothing to ignore.
