@@ -467,6 +467,9 @@
     const dot = el('status-dot'), text = el('status-text');
     const target = cfg.username && cfg.host ? `${cfg.username}@${cfg.host}` : 'not configured';
     if (cfg.demoMode) { dot.className = 'dot demo'; text.textContent = 'demo mode'; return; }
+    // Web mode has no connection to report — the server IS the VM. It's ready or
+    // the page wouldn't have loaded, so say that instead of "not configured".
+    if (isWeb) { dot.className = 'dot live'; text.textContent = 'claude on this VM'; return; }
     if (state === 'connecting') { dot.className = 'dot demo'; text.textContent = 'connecting… ' + (detail || target); }
     else if (state === 'connected') { dot.className = 'dot live'; text.textContent = detail || target; }
     else if (state === 'error') { dot.className = 'dot err'; text.textContent = 'error: ' + String(detail || '').slice(0, 60); }
@@ -562,32 +565,74 @@
   // the VM these are genuinely two different commits — ui is what you're
   // looking at, app is the shell that owns the SSH bridge — and showing only
   // one would recreate the exact confusion this is here to end.
+  let isWeb = false;   // served by server.js in a browser, rather than the .exe
+
   async function showBuild() {
     const ui = window.FLOURISH_BUILD || { sha: 'unstamped', dirty: true };
     let app = null;
     try { app = await api.getBuild(); } catch { /* older shell, no build:get */ }
+    isWeb = !!(app && app.web);
     const tag = (b) => b ? b.sha + (b.dirty ? '+' : '') : '?';
     const node = el('build-stamp');
     if (!node) return;
     const live = app && app.live;
-    node.textContent = live ? `ui ${tag(ui)} · app ${tag(app)} · live` : tag(ui);
+    // In web mode the UI and the server are the same working tree by
+    // construction, so two SHAs would be noise pretending to be information.
+    node.textContent = isWeb ? `${tag(ui)} · web` : (live ? `ui ${tag(ui)} · app ${tag(app)} · live` : tag(ui));
     node.classList.toggle('live', !!live);
-    node.title = [
-      `UI:  ${tag(ui)}${ui.branch ? ' (' + ui.branch + ')' : ''}${live ? ' — served live from the VM' : ' — packaged in this build'}`,
-      app ? `App: ${tag(app)}${app.branch ? ' (' + app.branch + ')' : ''} — the packaged shell (SSH bridge, system prompt)` : '',
-      '+ means uncommitted changes were in the tree when it was stamped.',
-    ].filter(Boolean).join('\n');
+    node.title = isWeb
+      ? `${tag(ui)}${ui.branch ? ' (' + ui.branch + ')' : ''} — web mode: UI and server are the same working tree, so they can't drift.\n` +
+        '+ means uncommitted changes were in the tree when it was stamped.'
+      : [
+        `UI:  ${tag(ui)}${ui.branch ? ' (' + ui.branch + ')' : ''}${live ? ' — served live from the VM' : ' — packaged in this build'}`,
+        app ? `App: ${tag(app)}${app.branch ? ' (' + app.branch + ')' : ''} — the packaged shell (SSH bridge, system prompt)` : '',
+        '+ means uncommitted changes were in the tree when it was stamped.',
+      ].filter(Boolean).join('\n');
+
+    // There is no SSH in web mode: claude runs on the box serving this page.
+    // Leaving a "Private key path" box on screen would invite Jim to paste a
+    // key somewhere nothing reads it.
+    if (isWeb) {
+      const hide = (id) => { const n = el(id); if (n) n.classList.add('hidden'); };
+      hide('ssh-only');
+      hide('cfg-devurl-field');
+      const t = el('settings-title'), l = document.querySelector('.settings-lede');
+      if (t) t.textContent = 'Claude Code on this VM';
+      if (l) l.innerHTML = 'This page is served by the VM, and <code>claude</code> runs there directly — ' +
+        'no SSH, no key, nothing installed on Windows. Rendering still happens here, on your GPU. ' +
+        'Claude Code uses whatever auth it already has on the VM.';
+      const tb = el('settings-test'); if (tb) tb.textContent = 'Check server';
+    }
   }
 
   // ---------- boot ----------
   (async function boot() {
-    cfg = await api.getConfig();
-    showBuild();
+    // boot now awaits the network (config + build), so there's a real window in
+    // which someone can type and hit Enter before we've said hello — the reply
+    // then lands ABOVE the greeting. Hold the prompt until we're ready.
+    // try/finally, not a plain re-enable: an exception here must not leave the
+    // input disabled forever. That is exactly how the last two builds failed.
+    setBusy(true);
+    try {
+      cfg = await api.getConfig();
+      await showBuild();        // sets isWeb, which the lines below read
+    } catch (e) {
+      console.error('boot failed', e);
+      plainLine('error', '⚠ Could not reach the server: ' + ((e && e.message) || e));
+      cfg = cfg || {};
+    } finally {
+      // Only hand the prompt back if nothing is using it. Someone can submit
+      // while boot is still awaiting the network, and an unconditional
+      // setBusy(false) here re-enables the input in the middle of that reply —
+      // clobbering the busy state sendMessage() just set.
+      if (!activeLine) setBusy(false);
+    }
     setStatus('idle');
-    const configured = cfg.demoMode || (cfg.host && cfg.username);
+    const configured = cfg.demoMode || isWeb || (cfg.host && cfg.username);
     plainLine('system', '✦ Flourish ready. ' + (configured
       ? (cfg.demoMode ? 'Demo mode is on — say hello and watch the effects.'
-        : 'Type a message to run it through Claude Code on ' + cfg.host + '.')
+        : isWeb ? 'Type a message to run it through Claude Code on this VM.'
+          : 'Type a message to run it through Claude Code on ' + cfg.host + '.')
       : 'Open settings (⚙) to point it at Claude Code on your VM, or turn on Demo mode.'));
     input.focus();
     idle.kick();

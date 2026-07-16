@@ -45,15 +45,42 @@ ipcMain.on('chat:send', () => {});
 
 const urlArg = process.argv.find((a) => a.startsWith('--url='));
 const URL_ARG = urlArg ? urlArg.slice('--url='.length) : '';
+// --web drops the preload entirely, so src/webapi.js has to provide
+// window.flourishAPI over HTTP against the real server — i.e. exactly what
+// Chrome on Jim's PC does. Without this flag we'd be testing Electron's IPC and
+// calling it proof about a browser.
+const WEB = process.argv.includes('--web');
 
 const failures = [];
 const check = (ok, msg) => { if (!ok) failures.push(msg); console.log(`${ok ? 'ok  ' : 'FAIL'} - ${msg}`); };
+
+// In web mode the reply must come from the server, so put it in demo mode for
+// the run (deterministic, free) and hand the config back exactly as found.
+async function withDemoMode(base, fn) {
+  const cfgUrl = base.replace(/\/$/, '') + '/api/config';
+  let saved = null;
+  try {
+    saved = await (await fetch(cfgUrl)).json();
+    await fetch(cfgUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ demoMode: true }) });
+  } catch (e) { failures.push('could not reach the server to set demo mode: ' + e.message); }
+  try { return await fn(); }
+  finally {
+    if (saved) {
+      try {
+        await fetch(cfgUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ demoMode: saved.demoMode }) });
+      } catch { console.error('WARNING: could not restore demoMode — check /api/config'); }
+    }
+  }
+}
 
 async function main() {
   const win = new BrowserWindow({
     width: 1120, height: 720, show: true, backgroundColor: '#05070a',
     webPreferences: {
-      preload: path.join(ROOT, 'preload.js'),
+      // No preload in web mode: that's the whole point of the test.
+      ...(WEB ? {} : { preload: path.join(ROOT, 'preload.js') }),
       contextIsolation: true, nodeIntegration: false, sandbox: false,
     },
   });
@@ -85,19 +112,30 @@ async function main() {
   else win.loadFile(path.join(ROOT, 'src', 'index.html'));
   await new Promise((r) => win.webContents.once('did-finish-load', r));
 
-  const requestId = 'smoke-1';
-  win.webContents.send('session:auto', { requestId, userText: 'show me the effects' });
+  if (WEB) {
+    // Drive it the way a person does: type, press Enter, and let webapi.js ask
+    // the real server over the real network. Nothing is faked.
+    await win.webContents.executeJavaScript(`
+      document.getElementById('input').value = 'show me the effects';
+      document.getElementById('input-row').dispatchEvent(
+        new Event('submit', { cancelable: true, bubbles: true }));
+      true;
+    `);
+  } else {
+    const requestId = 'smoke-1';
+    win.webContents.send('session:auto', { requestId, userText: 'show me the effects' });
 
-  // Stream the showcase the way main.js's streamDemo does.
-  const chunks = SHOWCASE.match(/.{1,6}/gs) || [];
-  for (const c of chunks) {
-    win.webContents.send('chat:delta', { requestId, text: c });
-    await new Promise((r) => setTimeout(r, 4));
+    // Stream the showcase the way main.js's streamDemo does.
+    const chunks = SHOWCASE.match(/.{1,6}/gs) || [];
+    for (const c of chunks) {
+      win.webContents.send('chat:delta', { requestId, text: c });
+      await new Promise((r) => setTimeout(r, 4));
+    }
+    win.webContents.send('chat:done', { requestId });
   }
-  win.webContents.send('chat:done', { requestId });
 
   // The reply is finished when the renderer hands the prompt back.
-  const deadline = Date.now() + 25000;
+  const deadline = Date.now() + (WEB ? 45000 : 25000);
   let ready = false;
   while (Date.now() < deadline) {
     ready = await win.webContents.executeJavaScript('!document.getElementById("input").disabled');
@@ -131,4 +169,5 @@ async function main() {
   app.exit(failures.length ? 1 : 0);
 }
 
-app.whenReady().then(main).catch((e) => { console.error(e); app.exit(1); });
+const run = () => (WEB && URL_ARG) ? withDemoMode(URL_ARG, main) : main();
+app.whenReady().then(run).catch((e) => { console.error(e); app.exit(1); });

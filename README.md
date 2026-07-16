@@ -208,7 +208,56 @@ own computed font on a scratch canvas.
 npm install        # ssh2 (pure-JS) is the only runtime dep
 ```
 
+## Two ways to run it
+
+**Web (default — no download, no exe, no AV).** Flourish runs on the VM and you
+open it in a browser on Windows:
+
+> **http://100.76.34.62/flourish/**
+
+`server.js` spawns `claude` as a local child process and serves `src/`. There is
+no SSH, no key, and nothing installed on Windows.
+
+**This does not move rendering to the VM.** Your browser executes the JS and
+paints every pixel on *your* GPU, at *your* refresh rate — Chrome and Electron
+are the same Chromium (same Skia, same compositor, same anti-aliasing). The VM
+ships ~200KB of text. (X-forwarding/VNC *would* render on the VM and look
+terrible. This is the opposite of that.)
+
+For a window that looks like an app rather than a tab — chromeless, pinnable to
+the taskbar:
+
+```
+chrome.exe --app=http://100.76.34.62/flourish/
+msedge.exe --app=http://100.76.34.62/flourish/
+```
+
+**Electron (legacy).** The packaged `.exe` still works and still SSHes in. It's
+kept for the case where Flourish has to run somewhere that isn't this VM. Be
+aware that it is an unsigned binary that reads a private key and executes remote
+commands with permissions bypassed — Windows Defender flags it, and Defender is
+not wrong. Clearing that properly needs a code-signing certificate.
+
 ## Start / Stop
+
+The web app runs under systemd and starts at boot:
+
+```bash
+sudo systemctl status flourish     # is it up?
+sudo systemctl restart flourish    # after a server.js / src/ change
+sudo journalctl -u flourish -f     # logs (including claude's stderr)
+```
+
+`src/` is served straight off the working tree, so **UI changes need no restart
+— just reload the page.** Only `server.js` changes need `restart`.
+
+Run it in the foreground instead:
+
+```bash
+npm run web        # node server.js on 127.0.0.1:8787
+```
+
+The Electron app:
 
 ```bash
 npm start          # launches the Electron app
@@ -293,9 +342,18 @@ directives leaking as text, a reply that doesn't land whole, or an input that
 never re-enables.
 
 ```bash
-npm run smoke                                        # the files in this checkout
-npm run smoke -- --url=http://100.76.34.62/flourish/ # what the live UI serves
+npm run smoke        # the files in this checkout, over Electron's IPC bridge
+npm run smoke:web    # NO preload — src/webapi.js against the live server, i.e.
+                     # exactly what Chrome on Windows does
 ```
+
+`smoke:web` is the one that matters for the web app, and it earns its keep: it
+immediately caught `/flourish/flourish.js` 404ing, because the server's
+prefix-stripping regex `/^\/flourish/` also matched the *start* of
+`flourish.js` and rewrote it to `.js`. Every other file loaded fine. The
+Electron path can't see that bug at all.
+
+It puts the server in demo mode for the run and restores your setting after.
 
 The `--url` form matters once you're using the dev loop: "works in the checkout"
 and "works in Jim's window" become different claims, and only the second is the

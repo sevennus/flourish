@@ -89,4 +89,19 @@ function buildCommand(userText, cfg, sessionId) {
   return 'bash -lc ' + shq(buildInner(userText, cfg, sessionId));
 }
 
-module.exports = { shq, normalizeTarget, connectConfig, connSignature, buildInner, buildCommand };
+// The same invocation as an argv array, for spawning `claude` directly when the
+// server already runs on the box Claude Code lives on (server.js). No shell, so
+// nothing here is quoted — shq() would embed literal quotes into the arguments.
+// Kept beside buildInner() on purpose: these two must teach the model the same
+// vocabulary, and they drift the moment they live apart.
+function buildArgs(userText, cfg, sessionId) {
+  const a = ['-p', String(userText)];
+  a.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages');
+  a.push('--append-system-prompt', FLOURISH_SYSTEM_PROMPT);
+  if (cfg.model && cfg.model.trim()) a.push('--model', cfg.model.trim());
+  if (sessionId) a.push('--resume', sessionId);
+  if (cfg.bypass !== false) a.push('--permission-mode', 'bypassPermissions');
+  return a;
+}
+
+module.exports = { shq, normalizeTarget, connectConfig, connSignature, buildInner, buildCommand, buildArgs };
