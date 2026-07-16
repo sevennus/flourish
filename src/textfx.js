@@ -137,6 +137,7 @@
       else if (name === 'confabulate') this._confabulate(span, chars, args);
       else if (name === 'intrusive') this._intrusive(span, chars, args);
       else if (name === 'overwrite') this._overwrite(span, chars, args);
+      else if (name === 'salvage') this._salvage(span, chars, args);
     }
 
     /**
@@ -446,6 +447,125 @@
         const a = el.animate(shut, ease);
         a.onfinish = () => el.remove();   // the text closes over the gap
       }, 1500 + Math.random() * 1200);
+    }
+
+    /*
+     * salvage — a line that assembles itself out of letters already on screen.
+     *
+     * Every character starts invisible (styles.css), and stays that way until a
+     * copy of it — lifted off a real letter somewhere else in the transcript —
+     * flies across the window and lands on its box. The letter it flies from is
+     * genuinely that letter: an `e` comes from an `e` that is sitting up there
+     * in something already said. That's the whole effect, and it's why the
+     * source has to be found rather than invented. It reads as text with no new
+     * material in it — assembled out of what was already lying around.
+     *
+     * When no source exists — a rare letter, punctuation, an empty transcript
+     * on the very first reply — the copy comes in from a random point in the
+     * window instead. That fallback is the honest one: nothing was salvaged, so
+     * nothing is claimed, and it still reads as a letter arriving from
+     * elsewhere. First replies of a session run almost entirely on it.
+     *
+     * The order of operations is the fragile part, and it's fragile for reasons
+     * this codebase has already paid for twice:
+     *
+     *   MEASURE EVERYTHING FIRST, IN ONE SYNCHRONOUS BLOCK. Both the source
+     *   index and every rect are read before a single flier launches. Text-node
+     *   offsets go stale the moment the soft-reveal flattens an <i> back into
+     *   the text before it, which happens continuously, a few frames later —
+     *   the same aliasing that quietly cost lightning three of its four strikes
+     *   (prepareStrikes, renderer.js). After this block, salvage holds numbers
+     *   and nothing else.
+     *
+     *   THEN CORRECT FOR SCROLL, TWICE. Those numbers are viewport coordinates
+     *   of text that keeps moving: the typewriter is still appending below and
+     *   the scroll spring is still chasing it. A flier's path is shifted once at
+     *   launch (for scrolling between measurement and take-off) and then tracks
+     *   `drift` every frame (for scrolling between take-off and landing).
+     *   Without both, letters land where the text used to be, which looks
+     *   exactly like a bug and not at all like an effect.
+     */
+
+    // A letter still has to come from somewhere when there's nothing to steal.
+    // Pushed to the edges and away from the target, so the fallback reads like
+    // the salvaged letters rather than like a character fading up in place.
+    _elsewhere(to) {
+      const w = window.innerWidth, h = window.innerHeight;
+      for (let i = 0; i < 8; i++) {
+        const p = { x: rand(0, w), y: rand(0, h) };
+        if (Math.hypot(p.x - to.x, p.y - to.y) > 240) return p;
+      }
+      return { x: chance(0.5) ? 0 : w, y: rand(0, h) };
+    }
+
+    // Find a real letter `ch` on screen. Case-exact first — the claim is that
+    // THIS letter was already up there — then either case, then give up.
+    // Entries that fail to measure are dropped from the index rather than
+    // retried: a stale node is stale for every character that wants it.
+    _source(idx, ch) {
+      const F = window.Flourish;
+      const keys = ch.toLowerCase() === ch.toUpperCase()
+        ? [ch]
+        : [ch, ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()];
+      for (const key of keys) {
+        const list = idx.get(key);
+        if (!list) continue;
+        for (let t = 0; t < 5 && list.length; t++) {
+          const j = (Math.random() * list.length) | 0;
+          const p = F.letterAt(list[j]);
+          if (p) return p;
+          list.splice(j, 1);
+        }
+      }
+      return null;
+    }
+
+    _salvage(span, chars, args) {
+      const F = window.Flourish;
+      const at = F.planSalvage(chars.length, args);
+
+      // One computed-style read for the span, not one per character. A flier in
+      // the wrong face or colour stops reading as the letter it's about to
+      // become — the handoff on landing has to be invisible.
+      const cs = getComputedStyle(chars[0]);
+      const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const color = cs.color;
+
+      // ---- everything below this line is measurement, and it all happens now ----
+      const idx = F.letterSources(span);
+      const base = F.scrollDrift();
+      const plan = [];
+      for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i].textContent;
+        if (!ch.trim()) { plan.push(null); continue; }   // whitespace: nothing to fly
+        const r = chars[i].getBoundingClientRect();
+        if (!r.width) { plan.push(null); continue; }
+        const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        plan.push({ ch, to, from: this._source(idx, ch) || this._elsewhere(to) });
+      }
+      // ---- from here on: numbers only ----
+
+      // A bound on how many letters can be in the air. A span this long is the
+      // model ignoring the prompt, and a thousand fliers would cost more than
+      // the effect is worth; the overflow just appears, which is what it would
+      // have done without the effect at all.
+      const MAX_FLIERS = 180;
+      let flown = 0;
+
+      for (let i = 0; i < plan.length; i++) {
+        const p = plan[i];
+        const c = chars[i];
+        if (!p || flown >= MAX_FLIERS) { c.style.opacity = '1'; continue; }
+        flown++;
+        setTimeout(() => {
+          if (!c.parentNode) return;       // transcript cleared underneath us
+          const d = base - F.scrollDrift();
+          this.effects.glyphFly(p.from.x, p.from.y + d, p.to.x, p.to.y + d, p.ch, {
+            font, color, drift: F.scrollDrift,
+            onLand: () => { c.style.opacity = '1'; },
+          });
+        }, at[i]);
+      }
     }
 
     /*

@@ -312,14 +312,17 @@ test('the text-effects reference sheet covers every style span', () => {
   }
 });
 
-test('the vocabulary is the full 58 effects', () => {
+test('the vocabulary is the full 59 effects', () => {
   // The count is asserted because the installed .exe embeds its own copy of
   // prompt.js, so the vocabulary Claude actually has is the one in the BUILD,
   // not the one in the repo. A session once reported "all 40 verified" against
   // a repo holding 50. A bare number here is the cheapest way to make that
   // drift fail loudly instead of quietly.
+  // POINT_EFFECTS stays 32 with shatter retired: a disabled effect keeps its
+  // name in the vocabulary so old transcripts don't print braces (see the
+  // retirement test above), so this count includes names that no longer paint.
   assert.strictEqual(POINT_EFFECTS.size, 32);
-  assert.strictEqual(STYLE_SPANS.size, 26);
+  assert.strictEqual(STYLE_SPANS.size, 27);
 });
 
 test('the consuming spans are taught with their guardrail', () => {

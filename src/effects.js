@@ -267,6 +267,57 @@
       this._ensureRunning();
     }
 
+    /**
+     * Fly one character across the window and land it on a target — the
+     * primitive `salvage` uses to assemble a line out of letters it took from
+     * text already on screen. The mirror of glyphFall: that one hands a
+     * character from the DOM to the canvas and drops it, this one carries a
+     * character over the canvas and hands it back.
+     *
+     * Two things it deliberately does not do. It never degrades the glyph the
+     * way glyphFall does — a salvaged letter has to arrive as itself, because
+     * the whole claim is that this exact letter was already up there. And it
+     * doesn't fade out at the end of its life: it lands at full strength and
+     * `onLand` reveals the real character underneath it on the same frame, so
+     * the handover is invisible. A flier that faded on approach would read as
+     * the letter failing to arrive.
+     *
+     * The arc is a quadratic bezier with the control point kicked perpendicular
+     * to the flight path, so letters coming from the same place don't travel in
+     * a bundle of parallel lines. `font` comes from the caller because the
+     * engine can't read the DOM — a flier in the wrong face stops looking like
+     * the letter it's about to become.
+     */
+    glyphFly(x0, y0, x1, y1, ch, o) {
+      o = o || {};
+      const dx = x1 - x0, dy = y1 - y0;
+      const dist = Math.hypot(dx, dy) || 1;
+      // Perpendicular kick, scaled to the trip and signed at random: a short
+      // hop barely bends, a cross-window haul sweeps.
+      const bow = Math.min(150, dist * 0.28) * (chance(0.5) ? 1 : -1);
+      this.particles.push({
+        mode: 'fly', shape: 'flyglyph',
+        x: x0, y: y0,
+        x0, y0, x1, y1,
+        cx: (x0 + x1) / 2 + (-dy / dist) * bow,
+        cy: (y0 + y1) / 2 + (dx / dist) * bow,
+        life: 0, delay: o.delay || 0,
+        max: o.dur || (420 + Math.min(620, dist * 0.55)),
+        ch, font: o.font || '13px monospace',
+        color: o.color || '#7effc4',
+        onLand: o.onLand,
+        // Both endpoints are viewport coordinates of text that keeps scrolling
+        // under the flier. `drift` hands back one number — how far the
+        // transcript has scrolled — and the whole path rides it, so the letter
+        // stays aimed at the character rather than at the hole it left. The
+        // engine still never touches the DOM: this is a closure that returns a
+        // number, the same deal as onLand.
+        drift: o.drift,
+        drift0: o.drift ? o.drift() : 0,
+      });
+      this._ensureRunning();
+    }
+
     // ---- point / particle effects ----
 
     // Four forms: an even radial burst, an upward fan, a crackling double-pop,
@@ -1082,9 +1133,29 @@
       for (const p of this.particles) {
         p.life += dt;
         if (p.delay && p.life < p.delay) { keep.push(p); continue; }
-        if (p.life >= p.max + (p.delay || 0)) continue;
+        if (p.life >= p.max + (p.delay || 0)) {
+          // Last chance to hand a flier's character back to the DOM. It has to
+          // happen here rather than at t>=1 in the fly branch below, because a
+          // particle is dropped on the frame its life runs out and never gets
+          // that update — a flier would vanish one frame short of its target
+          // and the character it was carrying would never be revealed.
+          if (p.onLand && !p.landed) { p.landed = true; p.onLand(); }
+          continue;
+        }
 
-        if (p.mode === 'polar') {
+        if (p.mode === 'fly') {
+          // Quadratic bezier, eased both ends: it leaves reluctantly and
+          // settles rather than slamming. Position is computed from t rather
+          // than integrated, so the landing is exact — a velocity-driven flier
+          // misses its target by whatever the last frame's dt happened to be,
+          // and "exactly on the character" is the entire illusion.
+          const t = Math.min(1, (p.life - (p.delay || 0)) / p.max);
+          const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+          const u = 1 - e;
+          p.x = u * u * p.x0 + 2 * u * e * p.cx + e * e * p.x1;
+          p.y = u * u * p.y0 + 2 * u * e * p.cy + e * e * p.y1;
+          if (p.drift) p.y += p.drift0 - p.drift();
+        } else if (p.mode === 'polar') {
           p.ang += p.vang * f;
           p.rad = Math.max(0, p.rad + p.vrad * f);
           p.x = p.cx + Math.cos(p.ang) * p.rad;
@@ -1534,6 +1605,31 @@
       for (const p of this.particles) {
         if (p.solid || p.shape === 'rect' || p.shape === 'shard') continue;
         if (p.delay && p.life < p.delay) continue;
+
+        if (p.shape === 'flyglyph') {
+          // Drawn before the alpha gate below on purpose: that gate fades a
+          // particle out across its life, and a salvaged letter has to be at
+          // full strength on the frame it lands. This one only fades UP, off
+          // its source, over the first fifth of the trip.
+          //
+          // Its own save/restore, against the batch's one-for-all: it needs
+          // centred alignment to sit on the target character, and leaking that
+          // into the shared context would shift every glyph and streak drawn
+          // after it by half a character.
+          const t = (p.life - (p.delay || 0)) / p.max;
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, Math.min(1, t * 5));
+          ctx.font = p.font;
+          ctx.fillStyle = p.color;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = p.color;
+          ctx.fillText(p.ch, p.x, p.y);
+          ctx.restore();
+          continue;
+        }
+
         let a = 1 - (p.life - (p.delay || 0)) / p.max;
         if (a <= 0) continue;
         if (p.twinkle) a *= 0.55 + Math.random() * 0.45;

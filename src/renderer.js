@@ -366,6 +366,85 @@
   }
 
   /*
+   * Where every letter currently on screen is, for `salvage` to steal from.
+   *
+   * Same division of labour as wordAnchors: the renderer owns the text, so the
+   * renderer measures, and textfx gets bare coordinates. Different sampling
+   * problem, though. wordAnchors wants a FEW anchors spread widely, so it
+   * stratifies. salvage wants to answer "where is there an `e` on screen?" for
+   * whatever letters a span happens to contain, so it needs an index, and it
+   * needs the index to be cheap enough to build at span-close time.
+   *
+   * The compromise is that indexing is cheap (string walking, no layout) and
+   * only the letters actually PICKED get measured (one Range each). A span of
+   * n characters costs n rect reads — the same order burn already pays.
+   *
+   * Nodes inside `exclude` are skipped: that's the salvage span itself, whose
+   * characters are the targets and are sitting at opacity 0. Letting the span
+   * steal from itself would fly letters in from the invisible boxes they were
+   * already heading for.
+   */
+  const SALVAGE_SCAN = 3000;   // characters indexed, from the tail backwards
+
+  function letterSources(exclude) {
+    const idx = new Map();
+    const walk = document.createTreeWalker(transcript, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walk.nextNode()) nodes.push(walk.currentNode);
+    const sr = screen.getBoundingClientRect();
+    let scanned = 0;
+    for (let i = nodes.length - 1; i >= 0 && scanned < SALVAGE_SCAN; i--) {
+      const n = nodes[i];
+      if (exclude && exclude.contains(n)) continue;
+      // One cheap rect for the whole node instead of one per character. A node
+      // far off screen is skipped entirely; anything that survives this gets
+      // checked properly, per character, in letterAt.
+      const host = n.parentElement;
+      if (!host) continue;
+      const hr = host.getBoundingClientRect();
+      if (!hr.width || hr.bottom < sr.top || hr.top > sr.bottom) continue;
+      const text = n.nodeValue;
+      for (let k = 0; k < text.length && scanned < SALVAGE_SCAN; k++) {
+        const c = text[k];
+        if (!c.trim()) continue;          // whitespace has nothing to fly
+        scanned++;
+        let list = idx.get(c);
+        if (!list) { list = []; idx.set(c, list); }
+        list.push({ node: n, offset: k });
+      }
+    }
+    return idx;
+  }
+
+  /*
+   * Measure one indexed letter. Returns null if it can't be seen — collapsed,
+   * scrolled out, or its node has been rewritten underneath the index.
+   *
+   * MUST be called in the same synchronous block that built the index, and
+   * salvage does exactly that. Offsets into a text node are only true until
+   * something splits or merges that node, and this transcript does both
+   * constantly: the soft-reveal flattens each <i> back into the text before it
+   * as it settles, and igniting a word splits the node around it. This is the
+   * same aliasing that cost lightning three of its four strikes (see
+   * prepareStrikes below) — the fix is the same one, which is to do all the
+   * measuring up front and then only ever hold numbers.
+   */
+  function letterAt(src) {
+    try {
+      const r = document.createRange();
+      r.setStart(src.node, src.offset);
+      r.setEnd(src.node, src.offset + 1);
+      const b = r.getBoundingClientRect();
+      if (!b.width || !b.height) return null;
+      const sr = screen.getBoundingClientRect();
+      if (b.bottom < sr.top || b.top > sr.bottom) return null;
+      return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    } catch (e) {
+      return null;   // index went stale: this letter just won't be salvaged
+    }
+  }
+
+  /*
    * Claim each word a bolt is about to hit, NOW, while its offsets are still
    * true.
    *
@@ -451,6 +530,15 @@
   window.Flourish.wordAnchors = wordAnchors;
   window.Flourish.strikeTargets = strikeTargets;
   window.Flourish.igniteWord = igniteWord;
+  window.Flourish.letterSources = letterSources;
+  window.Flourish.letterAt = letterAt;
+  // Salvage measures the transcript once and then flies for up to two seconds,
+  // while the typewriter keeps appending and the scroll spring keeps chasing
+  // it. Every coordinate it holds is a viewport coordinate of text that is
+  // still moving, so a flier has to know how far its own target has slid since
+  // it was aimed, or it lands where the character used to be. One number, read
+  // per frame off the element that actually scrolls.
+  window.Flourish.scrollDrift = () => screen.scrollTop;
 
   // Effects the renderer handles itself rather than handing to the canvas.
   // Returns true if the caller should stop and let the pause happen.

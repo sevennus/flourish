@@ -1,0 +1,117 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish: salvage, and the fallback that looks exactly like the effect working</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  ul li{margin:5px 0}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+  .back{display:inline-block;margin-bottom:18px;color:#94a3b8;text-decoration:none;font-size:13px}
+  .back:hover{color:#e0b54a}
+</style></head><body>
+<a class="back" href="../index.html">&larr; back to writeups</a>
+
+<h1>salvage, and the fallback that looks exactly like the effect working</h1>
+<p class="meta">Branch <code>dev</code> · <code>flourish.js</code>, <code>effects.js</code>, <code>textfx.js</code>, <code>renderer.js</code>, <code>styles.css</code>, <code>tools/salvage-probe.js</code>, <code>tools/smoke.js</code> · 2026-07-16</p>
+
+<h2>The ask</h2>
+<blockquote>"the shatter effect isn't good. get rid of that one. add a new effect where the incoming response letters are copied and flown in from elsewhere in the window."</blockquote>
+<p>Two jobs. The second one is the interesting one, and the word that decides it is <b>copied</b>. A letter flying in from a random point isn't copied from anything — it's just a fly-in animation. Copied implies an <b>original</b>. So <code>salvage</code> lifts each letter off a <b>real matching letter already on screen</b>: the <code>e</code> in the new line is fetched from an <code>e</code> in something already said. The meaning falls straight out of the mechanism — a line with no new material in it, assembled from what was already lying around.</p>
+
+<figure>
+  <img src="fig-inflight.png" alt="Individual letters o, n, t and a in flight across an otherwise normal Flourish transcript">
+  <figcaption><b>Mid-flight.</b> The target line does not exist yet. Those loose letters — <code>o</code>, <code>n</code>, <code>t</code>, <code>a</code> — have lifted off the paragraphs above and are crossing the window toward the boxes they're about to fill.</figcaption>
+</figure>
+<div class="two">
+<figure>
+  <img src="fig-assembling.png" alt="The line reading 'no t o e l' partially assembled with more letters converging">
+  <figcaption><b>Assembling, in reading order.</b> <code>no</code> has landed; the rest are inbound.</figcaption>
+</figure>
+<figure>
+  <img src="fig-landing.png" alt="The line reading 'not one letter of thi' with remaining letters converging">
+  <figcaption><b>Landing.</b> <em>"not one letter of this sentence is new"</em> — which is true of the sentence in both senses.</figcaption>
+</figure>
+</div>
+
+<h2>The trap, stated before it bit</h2>
+<p>Some letters can't be salvaged: a rare character, punctuation, or the first reply of a session with an empty transcript above it. Those need a fallback, and the only sane fallback is to fly in from a random point instead.</p>
+<p><b>That fallback is visually identical to the effect working.</b> Letters still converge, the line still assembles, the screenshot is still beautiful. An implementation whose source lookup returned nothing — ever, for any character — would photograph exactly like a correct one.</p>
+<p>This repo has already shipped that precise bug with a picture attached. <code>apophenia</code>'s committed reference shot was of its own fallback path, and <code>fx-shots</code> exits 0 no matter what is in the PNG. So the rule here isn't "take a screenshot to prove it." It's <b>the picture is not the evidence</b>. The evidence has to be a count.</p>
+
+<h2>How it's verified</h2>
+<p><code>tools/salvage-probe.js</code> streams a real reply through the real renderer and, for every flier, asks the <b>DOM</b> — not salvage — what character is really sitting at that coordinate, via <code>caretRangeFromPoint</code>. It's an independent oracle: a broken <code>_source()</code> can't fool it, because it never consults <code>_source()</code>.</p>
+<ul>
+  <li><b>At launch:</b> is there really an <code>e</code> where this <code>e</code> claims to have come from?</li>
+  <li><b>At landing:</b> is there really an <code>e</code> where this <code>e</code> came to rest?</li>
+</ul>
+<p>The second isn't a bonus. Both endpoints are viewport coordinates of text that is <b>still scrolling</b> — the typewriter appends below while the scroll spring chases it — so a flier that ignored drift would land on whatever line had slid into its target's old position. That reads as sloppy rendering rather than as a bug, which is exactly why it needs a number.</p>
+<pre>=== counts ===
+fliers:                      31
+found a real source:         31
+fell back to a random point: 0
+origin really had that char: <b class="good">31/31</b>
+landed on that char:         <b class="good">31/31</b> that landed
+characters revealed:         <b class="good">38/38</b>
+
+=== verdict ===
+actually salvaging, not just flying: <b class="good">yes</b>
+landing on target (drift corrected): <b class="good">yes</b>
+every character revealed:            <b class="good">yes</b></pre>
+
+<h2>Proving the probe bites</h2>
+<p>A green probe on working code proves nothing on its own — that's the whole lesson of this repo's history. So the source lookup was <b>deliberately sabotaged</b> (<code>_source()</code> forced to return <code>null</code>) and the probe re-run:</p>
+<pre>=== counts (source-finding sabotaged) ===
+fliers:                      31        &lt;-- still flies
+found a real source:         <b class="bad">0</b>
+fell back to a random point: <b class="bad">31</b>
+origin really had that char: <b class="bad">0/31</b>
+landed on that char:         31/31     &lt;-- still lands perfectly
+
+=== verdict ===
+actually salvaging, not just flying: <b class="bad">NO — this is the fallback path wearing the effect</b></pre>
+<p>Read the two columns that <em>didn't</em> change. With the effect completely gutted, 31 letters still fly, still arc, still land dead on their targets. <b>It looks perfect.</b> A screenshot of that run would have passed review, exactly as apophenia's did. Only <code>found a real source: 0</code> gives it away.</p>
+
+<h2>A second blind spot, in smoke</h2>
+<p><code>salvage</code> characters start at <code>opacity: 0</code> and are only turned on as their copies land, which creates a failure mode worse than the effect not painting: the sentence would be <b>present in the DOM, counted by <code>innerText</code>, and invisible on screen</b>. Every existing smoke assertion is blind to opacity. Sabotaging the reveal proves it:</p>
+<pre>ok   - the whole reply lands, first word to last          <b class="bad">&lt;-- green, with 55 of 65 characters invisible</b>
+ok   - the salvage span rendered its characters at all
+FAIL - salvage revealed every character (<b class="bad">10/65 visible</b>)</pre>
+<p>The pre-existing checks sail straight past it. <code>tools/smoke.js</code> now asks the computed style instead — opacity is precisely the thing <code>innerText</code> cannot see.</p>
+
+<h2>Retiring shatter, rather than deleting it</h2>
+<p><code>shatter</code> was turned down on the merits: it looked like a stock asset rather than like this terminal, and said nothing <code>shake</code> and <code>glitch</code> don't say better. But <b>deleting the name would have been a bug in its own right</b>, and a nastier one than the effect ever was.</p>
+<p>A name does two jobs. It resolves to something — that's the one you'd audit. It also gets <b>recognised, and therefore swallowed</b>: the parser sees it, strips it, and the reader never learns it was there. That second job is a service being provided to <b>every transcript ever written that contains it</b>. Drop the name from the vocabulary and those replies stop being prose and start rendering literal <code>{{fx:shatter}}</code> braces the next time anyone scrolls back through them.</p>
+<p>No grep finds those callers, because they aren't in the code — they're in the past. And <code>shatter</code> was in the prompt for months, so the transcripts are thick with it. A delete that corrupts the archive is worse than the effect it removes.</p>
+<p>So it joins <code>apophenia</code> in <code>DISABLED_EFFECTS</code>: still parses, no longer paints, engine code left unreachable so the revert is one entry in a set. Verified against the <b>live server</b>, which is still running the old showcase full of <code>{{fx:shatter}}</code> under the new parser:</p>
+<pre># target: http://100.76.34.62/flourish/
+ok   - <b class="good">no raw {{fx:}} directives leak into the transcript</b></pre>
+
+<h2>Two bugs found on the way</h2>
+<table>
+<tr><th>Found</th><th>Fix</th></tr>
+<tr><td><code>demo.js</code> still fired <code>{{fx:apophenia}}</code> months after it was retired — a showcase beat that painted nothing.</td><td>Removed. The retirement test is now written against <code>DISABLED_EFFECTS</code> rather than against <code>shatter</code>; a shatter-shaped assertion would have missed this exactly the way the last one did.</td></tr>
+<tr><td><code>README.md</code> listed <code>apophenia</code> in the live effects table.</td><td>Moved to a new <b>Retired effects</b> section documenting why retirement isn't deletion.</td></tr>
+</table>
+
+<h2>Verification</h2>
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td><code>npm test</code></td><td class="good">177/177 — including <code>planSalvage</code>'s ordering model and the retirement guarantees</td></tr>
+<tr><td>Retirement test bites</td><td class="good">Red on re-injected <code>apophenia</code>, green when removed</td></tr>
+<tr><td><code>npm run smoke</code> (local files)</td><td class="good">PASSED — <code>salvage revealed every character (65/65 visible)</code></td></tr>
+<tr><td>Smoke's visibility check bites</td><td class="good">Red at 10/65 when the reveal is sabotaged</td></tr>
+<tr><td><code>tools/salvage-probe.js</code></td><td class="good">31/31 real sources, 31/31 origins and landings confirmed by an independent oracle</td></tr>
+<tr><td>Probe bites</td><td class="good">Red at 0/31 when source-finding is sabotaged</td></tr>
+<tr><td><code>npm run smoke:web</code> (live server)</td><td class="warn">Retirement verified; salvage checks fail until the service is restarted — <code>demo.js</code> and <code>prompt.js</code> are <code>require()</code>d by <code>server.js</code> and baked in at startup</td></tr>
+</table>
+<p>That last row is the documented restart rule, not a defect. It was confirmed rather than assumed: <code>ps</code> on this session's parent shows the running server's <code>--append-system-prompt</code> <b>still teaching <code>{{fx:shatter}}</code></b>, which is why the model could still paint with it while writing this. The restart is Jim's to run — <code>server.js</code> spawns <code>claude</code> as a child, so restarting from inside kills the session doing the work, with <code>code 143</code>.</p>
+
+</body></html>

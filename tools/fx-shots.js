@@ -40,7 +40,7 @@ const POINT = [
   // Slower ones need longer to become themselves: frost has to creep, the
   // constellation has to find its links, aurora has to fade up.
   ['aurora', 1500], ['constellation', 900],
-  ['shatter', 420], ['swarm', 1100],
+  ['swarm', 1100],
   ['sonar', 700], ['warp', 480], ['frost', 1500], ['bloom', 1000],
   ['rain', 900], ['beam', 700], ['implode', 620],
   ['scanlines', 900], ['static', 300], ['vhs', 200], ['grid', 1200],
@@ -80,6 +80,7 @@ const SHEET = [
   ['stamp', 'a verdict, final'],
   ['scramble', 'decodes into place — reveals'],
   ['hexdump', 'raw bytes, low-level'],
+  ['salvage', 'flown in from letters already on screen'],
   ['hologram', 'projected, virtual, not real'],
   ['redact', 'a bar slides away — a reveal'],
   ['color', 'any specific colour'],

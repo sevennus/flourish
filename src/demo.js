@@ -24,7 +24,7 @@ const SHOWCASE =
   "{{fx:bloom rose}}a bloom as something opens up, {{fx:frost}}frost when it all goes cold, " +
   "and {{fx:warp violet}}warp when we jump. {{fx:embers}}\n\n" +
   "The loud ones: {{fx:confetti}}confetti on a win, {{fx:fireworks gold}}fireworks for the reveal, " +
-  "{{fx:lightning}}lightning for a hard truth, {{fx:shatter}}shattering glass when it breaks badly, " +
+  "{{fx:lightning}}lightning for a hard truth, " +
   "and {{fx:glitch}}a channel tear when it all goes wrong. {{fx:shake}}\n\n" +
   "And when it really lands — {{fx:nova}}{{fx:glow}}a nova{{/fx:glow}}. {{fx:pulse}}\n\n" +
   // The unreliable register. Everything above is honest — a glowing command is
@@ -36,8 +36,16 @@ const SHOWCASE =
   "{{fx:overwrite}}land on top of each other{{/fx:overwrite}}, " +
   "{{fx:palimpsest and this is what it said before}}an edit shows its workings{{/fx:palimpsest}}, " +
   "{{fx:rot}}this line will not survive being read twice{{/fx:rot}}, " +
-  "{{fx:confabulate}}you will always remember it correctly{{/fx:confabulate}}, and " +
-  "{{fx:apophenia}}lines link what was never linked. {{fx:dilate}} Then it just stops for a beat. {{fx:ripple mono}}\n\n" +
+  "{{fx:confabulate}}you will always remember it correctly{{/fx:confabulate}}. " +
+  "{{fx:dilate}} Then it just stops for a beat. {{fx:ripple mono}}\n\n" +
+  // salvage sits this late on purpose, and it's the one beat in the showcase
+  // whose position is load-bearing. It steals its letters from text already on
+  // screen, so up at the top — with an empty transcript above it — every
+  // character would miss and fall back to flying in from a random point. It
+  // would look identical and mean nothing. Down here it has five paragraphs to
+  // rob.
+  "{{fx:salvage}}This sentence was assembled out of letters already on this screen{{/fx:salvage}}, " +
+  "which is the one effect here that needs something to have been said first. {{fx:constellation}}\n\n" +
   "Every one of those was written into my reply by the {{fx:wave}}flourish protocol{{/fx:wave}} — " +
   "the same channel real Claude Code uses over SSH. The terminal adds its own on top: `inline code`, " +
   "**bold**, and numbers like 16000 highlight themselves, and every tool call paints its own shape. " +

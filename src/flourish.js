@@ -71,9 +71,23 @@
   // from the vocabulary instead, and any stray `{{fx:apophenia}}` in an old
   // transcript starts printing itself on screen as literal braces.
   //
+  // shatter is retired on the merits: breaking glass was the one effect that
+  // looked like a stock asset rather than like this terminal, and it said
+  // nothing `shake` and `glitch` don't say better. Turned down 2026-07-16.
+  //
+  // Retiring rather than deleting matters MORE here than it did for apophenia,
+  // and for the reason spelled out above: shatter was in the prompt for months
+  // and the model reached for it constantly, so the transcripts are full of it.
+  // Drop the name from POINT_EFFECTS and every one of those replies starts
+  // rendering `{{fx:shatter}}` as literal braces the next time it's scrolled
+  // back through — a delete that corrupts the archive instead of the feature.
+  // `_shatter` and the `shard` particle shape stay in effects.js, unreachable:
+  // the renderer never dispatches a disabled name, so they cost a few dead
+  // lines and buy a one-word revert.
+  //
   // So it resolves, and the renderer drops it on the floor. To bring it back,
   // take it out of this set and restore its line in prompt.js.
-  const DISABLED_EFFECTS = new Set(['apophenia']);
+  const DISABLED_EFFECTS = new Set(['apophenia', 'shatter']);
 
   // dilate paints nothing. It's here because it fires like a point effect and
   // the model names it like one, but the renderer intercepts it before the
@@ -87,6 +101,7 @@
     'flicker', 'redact', 'stamp', 'chrome', 'ghost', 'corrupt', 'sparkle',
     'burn', 'cascade', 'hologram', 'hexdump',
     'twin', 'overwrite', 'palimpsest', 'rot', 'confabulate', 'intrusive',
+    'salvage',
   ]);
 
   // Spans rendered one <i> per character (staggered animation or per-char JS)
@@ -96,6 +111,7 @@
     'wave', 'bounce', 'scramble', 'stamp', 'corrupt', 'sparkle',
     'burn', 'cascade', 'hexdump',
     'twin', 'overwrite', 'rot', 'confabulate', 'intrusive',
+    'salvage',
   ]);
 
   // Spans that CHANGE THE TEXT after it has landed, rather than styling it.
@@ -119,6 +135,7 @@
   // pull-back across `n` characters until it knows what `n` is.
   const SCRIPTED_SPANS = new Set([
     'burn', 'cascade', 'rot', 'confabulate', 'intrusive', 'overwrite',
+    'salvage',
   ]);
 
   // Spans that DESTROY the text they wrap — the characters are gone when the
@@ -200,6 +217,42 @@
     // Walk out from the seed in each direction, accumulating step costs.
     for (let i = from + 1; i < count; i++) at[i] = at[i - 1] + (w.dir > 0 ? downwind : upwind);
     for (let i = from - 1; i >= 0; i--) at[i] = at[i + 1] + (w.dir > 0 ? upwind : downwind);
+    return at;
+  }
+
+  // ---- salvage: text assembled out of letters already on screen ----
+
+  /**
+   * Plan when each character of a salvage span launches, in ms from the start.
+   * One entry per character, in character order.
+   *
+   * Default is reading order: the line assembles left to right, so it reads as
+   * text being written by something that had to go and fetch every letter
+   * first. `scatter` launches in a random order instead, which reads as the
+   * whole line condensing out of the page at once.
+   *
+   * The jitter is deliberately bounded under one step. Ragged arrival is the
+   * point — a perfectly even launch reads as a progress bar, the same trap
+   * leaderStair documents below — but jitter wide enough to reorder the line
+   * would turn reading order into a lie, and the default mode's only job is to
+   * be reading order.
+   */
+  function planSalvage(count, args, rnd) {
+    const random = rnd || Math.random;
+    const a = String(args || '').toLowerCase();
+    const step = a.includes('fast') ? 24 : (a.includes('slow') ? 88 : 44);
+    const order = [];
+    for (let i = 0; i < count; i++) order.push(i);
+    if (a.includes('scatter')) {
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = (random() * (i + 1)) | 0;
+        const t = order[i]; order[i] = order[j]; order[j] = t;
+      }
+    }
+    const at = new Array(count).fill(0);
+    for (let k = 0; k < order.length; k++) {
+      at[order[k]] = k * step + random() * step * 0.55;
+    }
     return at;
   }
 
@@ -814,7 +867,7 @@
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
     MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS,
     PALETTES, SIZES, parseArgs,
-    WIND_STRENGTH, parseWind, planBurn,
+    WIND_STRENGTH, parseWind, planBurn, planSalvage,
     ROT_GROUPS, ROT_VARIANTS, rotVariants,
     CONFAB_PAIRS, planConfab, overwriteShift, mutableMask,
     plausibleDirective, MAX_DIRECTIVE_LEN,

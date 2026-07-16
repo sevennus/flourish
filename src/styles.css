@@ -419,6 +419,27 @@ body {
    so this backstop and the animation land on the same colour. */
 .fx-burn[data-burnt="1"] > i { color: var(--ash); opacity: 1; text-shadow: none; }
 
+/* Letters that have to be flown in before they exist. Every character starts
+   invisible and textfx.js turns it on as its copy lands, so this rule IS the
+   effect's initial state — drop it and salvage becomes fliers landing on text
+   that was already there, which is nothing at all.
+
+   opacity, not visibility or display: the box has to be occupied from birth or
+   the line reflows as the letters arrive and every target measured up front is
+   wrong by the time it's flown to. Same constraint burn has, for the same
+   reason (see the header of textfx.js).
+
+   A 0.12s fade rather than a snap: the canvas flier and the DOM character are
+   different renderers, and swapping one for the other on a single frame catches
+   the eye as a flicker. Overlapping them briefly hides the seam. */
+.fx-salvage { display: inline-block; }
+.fx-salvage > i {
+  display: inline-block; font-style: normal;
+  opacity: 0;
+  transition: opacity 0.12s linear;
+  will-change: opacity;
+}
+
 /* The bytes underneath the text (renderer.js swaps the glyph, then .settled) */
 .fx-hexdump { display: inline-block; }
 .fx-hexdump > i {

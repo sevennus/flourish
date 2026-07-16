@@ -103,7 +103,6 @@ and must be closed; **consuming spans** destroy the text they wrap.
 | `{{fx:fireworks}}` | a bigger success |
 | `{{fx:lightning}}` | a sudden insight, a hard truth |
 | `{{fx:nova}}` | the biggest moments only |
-| `{{fx:shatter}}` | something broke hard |
 | `{{fx:glitch}}` | something broken or corrupt |
 | `{{fx:shake}}` | a failure |
 | `{{fx:scanlines}}` | retro, terminal, low-level |
@@ -112,7 +111,6 @@ and must be closed; **consuming spans** destroy the text they wrap.
 | `{{fx:grid}}` | synthwave, going somewhere |
 | `{{fx:circuit}}` | wiring, how it's connected |
 | `{{fx:tracer}}` | paths, routing, following a thread |
-| `{{fx:apophenia}}` | a conclusion reached badly — confident, wrong |
 | `{{fx:dilate}}` | *paints nothing* — the terminal holds still a beat |
 
 | Text span | Reads as |
@@ -132,6 +130,7 @@ and must be closed; **consuming spans** destroy the text they wrap.
 | `{{fx:stamp}}…{{/fx:stamp}}` | a verdict, a decision, final |
 | `{{fx:scramble}}…{{/fx:scramble}}` | text that decodes into place |
 | `{{fx:hexdump}}…{{/fx:hexdump}}` | raw bytes, low-level, machine |
+| `{{fx:salvage}}…{{/fx:salvage}}` | assembled out of what was already said |
 | `{{fx:hologram}}…{{/fx:hologram}}` | virtual, projected, not real |
 | `{{fx:redact}}…{{/fx:redact}}` | a bar slides away — a reveal |
 | `{{fx:twin}}…{{/fx:twin}}` | two copies, drifting out of sync |
@@ -165,6 +164,58 @@ either styles DOM or paints canvas, never both. `src/textfx.js` animates real
 characters *and* throws real particles off them — embers from the flame front,
 ash from consumed characters, falling glyphs for `cascade` — all from the same
 engine that draws a nova.
+
+### Salvage
+
+`{{fx:salvage}}` assembles its text out of letters that are **already on
+screen**. Every character starts invisible; a copy of it flies in across the
+window and lands on its box, and only then does the real character appear.
+
+The letter it flies from is a real one. `letterSources()` in `renderer.js`
+indexes the visible transcript, and an `e` is fetched from an `e` in something
+already said — case-exact where possible. When there's genuinely nothing to
+steal (a rare letter, punctuation, the first reply of a session) the copy comes
+in from a random point in the window instead, which claims nothing and still
+reads as arrival from elsewhere.
+
+That's the meaning: a line with **no new material in it**. Point it at a quote,
+a callback, a summary, a conclusion built out of earlier parts.
+
+Two constraints shape the implementation, and both are scar tissue:
+
+- **All measurement happens up front, in one synchronous block.** Text-node
+  offsets go stale as soon as the soft-reveal flattens an `<i>` back into the
+  text before it — the same aliasing that quietly cost `lightning` three of its
+  four strikes. After that block, salvage holds numbers and nothing else.
+- **Scroll is corrected twice**: once at launch (for scrolling between
+  measurement and take-off) and then per frame via `drift` (for scrolling
+  between take-off and landing). The transcript is still growing and the scroll
+  spring is still chasing it, so without both, letters land where the text used
+  to be — which reads as a bug, not an effect.
+
+Takes `scatter` (arrives all at once rather than in reading order) and
+`fast`/`slow`. Launch scheduling is pure arithmetic in `flourish.js`
+(`planSalvage`), unit-tested, for the same reason `planBurn` is.
+
+### Retired effects
+
+`{{fx:apophenia}}` and `{{fx:shatter}}` still **parse** and no longer **paint**.
+They live in `DISABLED_EFFECTS` (`flourish.js`); the renderer drops them on the
+floor.
+
+Retiring rather than deleting is deliberate, and it's about the archive rather
+than the feature. A name that still parses is a name that gets *stripped from
+the stream* — that's a service being provided to every transcript ever written
+that contains it. Take the name out of the vocabulary and it stops being
+swallowed and starts being **printed**: old replies begin rendering
+`{{fx:shatter}}` as literal braces the next time anyone scrolls back through
+them. The callers aren't in the code, so no grep can find them; they're in the
+past. A delete that corrupts the record is a worse bug than the effect was.
+
+Both keep their engine code, unreachable, so the revert is one entry in a set.
+`shatter` was turned down on the merits (it looked like a stock asset, and said
+nothing `shake` and `glitch` don't say better); `apophenia` was fixed, seen
+working, and turned down after a fair trial.
 
 ### Unreliable spans
 

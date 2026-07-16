@@ -183,6 +183,23 @@ async function main() {
     check(text.includes(phrase), `renders: "${phrase}"`);
   }
 
+  // salvage is the one span in the showcase that every check above is blind to.
+  // Its characters start at opacity 0 (styles.css) and are only turned on as
+  // their flown-in copies land, so a salvage that never revealed would leave a
+  // sentence that is present in the DOM, counted by innerText, and completely
+  // invisible on screen — passing every assertion in this file while being the
+  // worst failure in it. Ask the computed style instead: opacity is exactly the
+  // thing innerText doesn't see.
+  const salvage = await win.webContents.executeJavaScript(`
+    (function () {
+      const cs = [...document.querySelectorAll('#transcript .fx-salvage > i')];
+      return { n: cs.length, shown: cs.filter(i => getComputedStyle(i).opacity === '1').length };
+    })()
+  `);
+  check(salvage.n > 0, 'the salvage span rendered its characters at all');
+  check(salvage.n > 0 && salvage.shown === salvage.n,
+    `salvage revealed every character (${salvage.shown}/${salvage.n} visible)`);
+
   console.log(`\n${failures.length ? `FAILED (${failures.length})` : 'PASSED'} — smoke\n`);
   win.destroy();
   app.exit(failures.length ? 1 : 0);
