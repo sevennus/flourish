@@ -13,6 +13,17 @@ installed on Windows, and no credentials live in the app.
 
 ![what it looks like](assets/screenshot.png)
 
+Flourish lives at **`/var/www/flourish`** and is its own repo
+([sevennus/flourish](https://github.com/sevennus/flourish)) as of 2026-07-16. It
+used to be `/var/www/simjim/apps/flourish`, which meant two Claude sessions editing
+one git tree and reading each other's uncommitted work as their own. The app it
+*drives* is still SimJim — see `cwd` in `server.js`. Rules for working in here:
+**`CLAUDE.md`**.
+
+**Bug writeups live in this repo too** — `src/writeups/`, linked from the titlebar,
+served at `/flourish/writeups/index.html`. Symptom, how it was found, root cause,
+options, fix, verification — with the evidence as viewable artifacts.
+
 ## How it works
 
 ```
@@ -492,18 +503,17 @@ npm run package:win
 Output: `dist/Flourish-win32-x64/Flourish.exe` — copy the folder/zip to your
 Windows 11 box and double-click. No install step.
 
-To pull it onto the Windows box, nginx serves the zip **over the tailnet only**
-(basic-auth, SimJim Admin — see `FENCE.md`):
+**The tailnet download is gone (2026-07-16).** nginx used to serve the packaged zip
+at `/dl/Flourish-win32-x64.zip`; that location block and the 142MB zip behind it
+were both deleted when Flourish moved to its own repo. The app is a web app now —
+there is no `.exe` to distribute, and nothing in the nginx config points at a file
+on disk any more. Open `http://100.76.34.62/flourish/` instead.
 
-```
-http://100.76.34.62/dl/Flourish-win32-x64.zip
-```
-
-Or over SSH: `scp aiops@100.76.34.62:/var/www/simjim/apps/flourish/dist/Flourish-win32-x64.zip .`
-
-It is deliberately **not** reachable from simjim.net or dev.simjim.net. It's a
-142MB unsigned `.exe`; Windows SmartScreen will warn on first run either way
-("More info" → "Run anyway").
+Packaging still works if you want a local build; you just have to copy it across
+yourself (`scp aiops@100.76.34.62:/var/www/flourish/dist/Flourish-win32-x64.zip .`).
+Expect Windows SmartScreen to warn on first run ("More info" → "Run anyway") — and
+note that Defender flagging the *previous* unsigned build is precisely why this
+stopped being the way in.
 
 Sanity-check a fresh package before shipping it — `--prune=true` has to keep
 every `src/` file the renderer loads, and a missing one is a blank window:

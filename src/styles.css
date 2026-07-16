@@ -78,6 +78,17 @@ body {
 .dot.live { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 .dot.demo { background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); }
 .dot.err  { background: var(--err); box-shadow: 0 0 8px var(--err); }
+/* Writeups. Dim like the build stamp, for the same reason: findable when
+   something misbehaves, not competing with the transcript the rest of the time.
+   Text, not a glyph — the titlebar sits in a mono-ish stack and an emoji here
+   tofus, the same trap the CSS content: rule ran into. */
+#writeups-link {
+  color: var(--fg-dim); text-decoration: none; font-size: 12px;
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px;
+  opacity: 0.7; transition: color .12s, border-color .12s, opacity .12s;
+}
+#writeups-link:hover { color: var(--fg); border-color: var(--accent); opacity: 1; }
+
 #settings-btn {
   background: transparent; border: 1px solid var(--line); color: var(--fg-dim);
   border-radius: 6px; width: 30px; height: 28px; cursor: pointer; font-size: 15px;

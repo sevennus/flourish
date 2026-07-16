@@ -1,0 +1,12 @@
+# target: /var/www/simjim/apps/flourish/src/index.html
+ok   - renderer logs no errors
+ok   - input is re-enabled after the reply (you can type the next prompt)
+ok   - no raw {{fx:}} directives leak into the transcript
+ok   - the whole reply lands, first word to last
+ok   - renders: "a terminal that paints as it speaks"
+ok   - renders: "The quiet ones"
+ok   - renders: "The working ones"
+ok   - renders: "The moods"
+ok   - renders: "The loud ones"
+ok   - renders: "a nova"
+PASSED — smoke

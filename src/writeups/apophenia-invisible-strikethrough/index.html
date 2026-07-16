@@ -1,0 +1,118 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish: apophenia drew a line through the prose, and its screenshot was of a code path nobody ever runs</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  ul li{margin:5px 0}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+</style></head><body>
+<h1>Flourish: apophenia drew a line through the prose, and its screenshot was of a code path nobody ever runs</h1>
+<p class="meta">Branch <code>dev</code> · <code>apps/flourish/src/renderer.js</code>, <code>src/flourish.js</code>, <code>src/effects.js</code>, <code>tools/fx-shots.js</code> · shipped broken in <code>852d95c</code> · 2026-07-16</p>
+
+<h2>The symptom</h2>
+<p>Jim asked to see <code>apophenia</code>. I fired it. He asked again. I fired it again, in a different palette, and explained what it was doing. He asked a third time:</p>
+<blockquote>"do it again i really dont see the effect"</blockquote>
+<p>Three requests is the tell. The standing lesson from the input-disable bug is that when Jim reports the same thing three times, the thing to suspect is <b>my assertion</b>, not his eyes — and I had spent three turns describing an animation I had never actually verified paints. It doesn't. On the real path, apophenia draws a near-horizontal hairline along one line of the transcript. It reads as a <b>strikethrough</b>, not a constellation.</p>
+
+<h2>How I found it</h2>
+<p>Reading the code found nothing, three times over, and each dead end was informative:</p>
+<table>
+<tr><th>Suspicion</th><th>Result</th></tr>
+<tr><td>Not registered — the directive is stripped as unknown</td><td class="good">Wired correctly: <code>flourish.js:55</code> lists it, <code>renderer.js:373</code> passes anchors, <code>effects.js:606</code> implements it.</td></tr>
+<tr><td>Not drawn — <code>webs</code> missing from the frame loop</td><td class="good">Present in <code>_busy()</code>, ticked in <code>_update()</code>, drawn in <code>_draw()</code>.</td></tr>
+<tr><td>Coordinate-space mismatch — <code>wordAnchors</code> returns viewport coords</td><td class="good">Correct space. The canvas is full-viewport (<code>window.innerWidth/innerHeight</code>) and <code>caretPos</code> uses <code>getBoundingClientRect</code> too.</td></tr>
+</table>
+
+<p>So I looked at the committed reference shot — the artifact whose whole job is to prove the effect paints. <b>It is a picture of the bug's absence.</b></p>
+<figure>
+  <img src="fig-shipped-shot-fallback.png" alt="The committed apophenia.png: a web of eight points in empty space below a three-word line of text">
+  <figcaption><b>The shot that shipped</b> (<code>assets/fx/apophenia.png</code> at <code>ba15bc1</code>). The transcript contains three words — <em>"effect under test"</em> — and the web is drawn in <b>empty space below them</b>, touching none of them. Eight points is the giveaway: that's the <code>pts.length &lt; 3</code> fallback inventing its own points around the caret. This is a photograph of the fallback path.</figcaption>
+</figure>
+<p>The cause is one line in the harness. <code>tools/fx-shots.js:148</code> fired every point effect the same way:</p>
+<pre>await win.webContents.executeJavaScript(`window.__fx.fire('${name}', 560, 330); true;`);</pre>
+<p>No options object, so <code>o.anchors</code> is <code>undefined</code>. That is fine for all 30 other point effects, because they invent their own points from <code>(x, y)</code> anyway. <b>apophenia is the only effect whose input comes from outside itself</b>, and <code>wordAnchors</code> is only ever called from <code>applyEvents</code> in the renderer, which the harness bypasses entirely. The real path had never been rendered by any test, screenshot, or unit test.</p>
+
+<p>So I wrote <code>tools/apophenia-probe.js</code>, which drives the real renderer over the real preload with a real streamed reply and records what <code>fire()</code> is actually handed. (Two false starts worth noting, both already documented in <code>smoke.js</code>: a bare Electron entry point needs <code>main.js</code>'s IPC handlers stubbed, and a <code>show: false</code> window throttles rAF so the typewriter never reaches the directive.) The first run answered it outright:</p>
+<pre>=== anchor spread ===
+anchors: 14
+x range: 77 -> 786 = 709 px
+y range: 178 -> 178 = <b class="bad">0 px</b>          &lt;-- every anchor on one baseline
+distinct text lines (distinct y): <b class="bad">1</b></pre>
+<figure>
+  <img src="fig-before-strikethrough.png" alt="A Flourish reply with a faint horizontal line struck through the second line of text">
+  <figcaption><b>The bug, on the real path.</b> Look at the second line: <em>"mint was chosen the same week the renderer died…"</em> has a rule struck through it. That is apophenia, working exactly as written. The engine is healthy — <code>webs</code> alive, 14 points, 9 pairs, drawing every frame. It is drawing nine hairlines between fourteen <b>collinear</b> points.</figcaption>
+</figure>
+
+<h2>The root cause</h2>
+<p><code>wordAnchors(max)</code> walked the transcript <b>backwards from the tail</b> and took the first 14 words it found. Fourteen consecutive words is, almost exactly, one visual line of text.</p>
+<p>So the anchor set was collinear <b>by construction</b> — not by bad luck, not intermittently, not in some layouts. Every pair it linked resolved to a horizontal segment on a shared baseline, and nine of them stacked into one line. apophenia's entire visual identity depends on two-dimensional spread, and the sampling strategy guaranteed one dimension. It was never once visible in the app, from the moment it shipped.</p>
+<p><code>constellation</code> shares the same draw code and is fine, because it invents its own points in a disc around the caret. The difference between the two effects is exactly the thing that was broken.</p>
+
+<h2>The options, and what we chose</h2>
+<p>Presented to Jim before touching anything; he took all three.</p>
+<table>
+<tr><th>Option</th><th>Decision</th></tr>
+<tr><td><b>Sample across the whole visible transcript</b> rather than the last 14 words — stratify over distinct baselines, a few words per line.</td><td class="good">Chosen. It's also thematically the right answer: apophenia linking words from four different paragraphs <i>is</i> the effect. Words from one line were never going to look like a conclusion drawn badly.</td></tr>
+<tr><td><b>Draw the web under the text</b> instead of over it.</td><td class="good">Chosen. It can then never read as a strikethrough — the standing rule that text which looks like it's eroding is the one thing Jim hates.</td></tr>
+<tr><td><b>Make <code>fx-shots</code> fire it the way the renderer does</b>, and fail loudly rather than silently photograph the fallback.</td><td class="good">Chosen. The harness is why this shipped.</td></tr>
+<tr><td>Leave the geometry inline in <code>effects.js</code>.</td><td class="bad">Rejected. <code>effects.js</code> needs a canvas, so nothing in <code>node --test</code> can reach it — which is half of why this survived 122 green tests. The rules moved to <code>flourish.js</code>, which is pure.</td></tr>
+</table>
+
+<h2>The fix</h2>
+<p>Three rules, all pure and unit-tested in <code>src/flourish.js</code>:</p>
+<ul>
+<li><code>stratifyAnchors(cand, max, rnd)</code> — round-robin one word per line per pass. <code>wordAnchors</code> now measures a pool of up to 90 candidate words and stratifies down to 14, instead of taking the first 14 off the tail. The pool has to be several times <code>max</code> for there to be anything to stratify over.</li>
+<li><code>anchorsFlat(pts)</code> — a whole-set degeneracy check. A short reply genuinely has one line of transcript and nowhere to hang a web; that's not a bug, but it must be <b>detectable</b>, so <code>_apophenia</code> takes its invented-points path rather than striking the only line of text out.</li>
+<li><code>planApopheniaPairs(pts, rnd)</code> — per-pair angle rule. <b>This one took two attempts.</b></li>
+</ul>
+<p>The first attempt rejected only same-baseline pairs. The set-wide check passed, the set spanned four lines — and the shot still had a rule through its top line:</p>
+<figure>
+  <img src="fig-mid-fix-still-striking.png" alt="Reference shot mid-fix: the web spans four lines but the top line is still struck through">
+  <figcaption><b>Half-fixed, and still wrong.</b> A set can span the transcript, pass <code>anchorsFlat</code>, and still contain pairs that graze. Two words on <b>adjacent</b> lines a thousand pixels apart make a segment at about 5°, which travels along the prose for its whole length and reads as an underline just as much as a flat one does.</figcaption>
+</figure>
+<p>The defect was never the baseline — it's the <b>angle</b>. One rule covers both cases, since a same-line pair has slope zero:</p>
+<pre>const MIN_SLOPE = 0.18;   // rise per unit run, ≈10° off horizontal
+
+function pairShallow(a, b) {
+  return Math.abs(a.y - b.y) &lt; MIN_SLOPE * Math.abs(a.x - b.x);
+}</pre>
+<p>Deliberately asymmetric, because text is: a line of prose is ~1000px of run and ~22px of rise, so the near-horizontal links are the ones the layout makes easy. Distance is still ignored on purpose — a line across the whole screen asserted as confidently as one between neighbours is the effect working.</p>
+<p>Rendering: a second canvas <code>#fx-canvas-under</code> at <code>z-index: 0</code>, beneath <code>#app</code> (z-index 1) but above the page background. Only apophenia's web uses it; every other effect stays on the overlay at z-index 50, where being on top is the point. This works only because <code>#app</code>, <code>#screen</code> and <code>#transcript</code> are all transparent — give any of them a background and the canvas silently disappears, which is noted in the CSS.</p>
+
+<h2>Verification</h2>
+<table>
+<tr><th></th><th>anchors</th><th>x range</th><th>y range</th><th>text lines</th><th>reads as</th></tr>
+<tr><td>shipped (<code>ba15bc1</code>)</td><td>14</td><td>709 px</td><td class="bad">0 px</td><td class="bad">1</td><td class="bad">a strikethrough</td></tr>
+<tr><td>fixed</td><td>14</td><td>876 px</td><td class="good">158 px</td><td class="good">6</td><td class="good">a web</td></tr>
+</table>
+<figure>
+  <img src="fig-after-fixed.png" alt="A Flourish reply with a violet web of diagonal lines linking words across three paragraphs, drawn behind the text">
+  <figcaption><b>Fixed, on the real streaming path</b> (<code>tools/apophenia-probe.js</code>). Lines span paragraphs — "Tuesday" hooked to a word two lines down, the renderer sentence tied to the GPU sentence — and pass <b>behind</b> the characters instead of through them. Same probe, same reply, same 14 anchors requested.</figcaption>
+</figure>
+<figure>
+  <img src="fig-reference-shot-after.png" alt="The regenerated apophenia.png reference shot: a web over four paragraphs of prose">
+  <figcaption><b>The reference shot, now of the real path.</b> <code>fx-shots</code> gives apophenia real prose and real anchors from the renderer's own <code>wordAnchors</code>, and throws if they come back too few or collinear — so this shot can no longer quietly become a picture of the fallback. Its prose was also lengthened: a four-line transcript isn't a fair test, because every link in it is near-horizontal for want of anywhere else to go.</figcaption>
+</figure>
+<ul>
+<li><b>143 unit tests pass</b> (was 122; +21 for the anchor geometry — see <a href="new-tests.txt">new-tests.txt</a>). The collinear case in them is not invented: it's the exact anchor set the real renderer produced, captured by the probe.</li>
+<li>The regression test sweeps <b>200 seeds</b>, not one. The old sampling failed 100% of the time, so a single passing draw would prove nothing.</li>
+<li><code>npm run smoke</code> — 13/13, renderer logs no errors.</li>
+<li><code>npm run fx-shots</code> — 44 frames, apophenia now asserted rather than assumed. <a href="anchors-probe.txt">anchors-probe.txt</a> has the full before/after probe output.</li>
+</ul>
+
+<h2>What this cost, and what it says</h2>
+<p>The effect was dead on arrival and shipped with a beautiful screenshot of a code path that only runs when the effect has nothing to work with. Two things made that possible, and neither is about apophenia:</p>
+<ul>
+<li><b>A harness that exercises a fallback is worse than no harness</b>, because it produces an artifact that looks like proof. <code>fx-shots</code>'s uniformity — every effect fired identically — was the bug: it silently swallowed the one effect that isn't uniform.</li>
+<li><b>Three reports beat any amount of confidence.</b> This is the third time a green check has sat on top of something Jim was telling me was broken (the disabled input, the PRNG-ordered verify, now this). Each time the fastest path to the truth was to stop reasoning and go measure the real thing.</li>
+</ul>
+</body></html>

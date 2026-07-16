@@ -1,0 +1,13 @@
+# target: /var/www/simjim/apps/flourish/src/index.html
+FAIL - renderer logs no errors
+       Uncaught TypeError: str.indexOf is not a function (file:///var/www/simjim/apps/flourish/src/renderer.js:281)
+FAIL - input is re-enabled after the reply (you can type the next prompt)
+ok   - no raw {{fx:}} directives leak into the transcript
+FAIL - the whole reply lands, first word to last
+FAIL - renders: "a terminal that paints as it speaks"
+FAIL - renders: "The quiet ones"
+FAIL - renders: "The working ones"
+FAIL - renders: "The moods"
+FAIL - renders: "The loud ones"
+FAIL - renders: "a nova"
+FAILED (9) — smoke

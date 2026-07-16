@@ -1,0 +1,138 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish: every reply died after its first word, and the prompt box never came back</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  ul li{margin:5px 0}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+</style></head><body>
+<h1>Flourish: every reply died after its first word, and the prompt box never came back</h1>
+<p class="meta">Branch <code>dev</code> · <code>apps/flourish/src/renderer.js</code> · fixed in <code>87ff19d</code> · 2026-07-16</p>
+
+<h2>The symptom</h2>
+<p>Jim, on the last two packaged builds: <em>"even in demo mode I say 'show me the effects' and I just see 'claude', and I still can't type in the prompt box between prompts."</em></p>
+<p>Both halves were literally true, and they turned out to be the same defect. The word <code>claude</code> he could see wasn't a reply at all — it's the <b>label</b> the renderer puts above each assistant line (<code>renderer.js:79</code>). He was looking at an empty assistant line with its label and nothing under it.</p>
+
+<h2>How I found it</h2>
+<p>The tests were no help, and that was the first real clue:</p>
+<table>
+<tr><th>Check</th><th>Result on the broken build</th></tr>
+<tr><td><code>npm test</code></td><td class="bad">88/88 pass — it only covers the pure modules (parser, bridge, scroller). None of them load the renderer.</td></tr>
+<tr><td><code>npm run screenshot</code></td><td class="bad">Wrote a PNG and <b>exited 0</b> — a screenshot of the wreckage is still a screenshot.</td></tr>
+</table>
+<p>So I reproduced it headlessly instead of reading code. <code>npm run screenshot</code> renders the exact demo showcase, and the PNG showed the whole bug on its own: the reply stops dead at <code>Welcome</code> — the word immediately before the showcase's first <code>{{fx:neon}}</code> directive.</p>
+<figure>
+  <img src="fig-before-broken.png" alt="Flourish showing an assistant line labelled 'claude' containing only the word 'Welcome'">
+  <figcaption><b>The bug, reproduced.</b> The demo reply is <code>"Welcome to {{fx:neon}}Flourish{{/fx:neon}} — a terminal that…"</code>. It renders <code>Welcome</code>, then stops at the first directive. The <code>claude</code> above it is the line label, which is exactly what Jim was describing.</figcaption>
+</figure>
+<p>That pinned the failure to the first directive. Loading the real renderer over the real preload and capturing the renderer console gave the rest immediately:</p>
+<pre>[console:3] Uncaught TypeError: str.indexOf is not a function   (renderer.js:278)
+    at microFx     (renderer.js:278:13)
+    at appendText  (renderer.js:288:5)
+    at appendInto  (renderer.js:233:12)
+    at emitRuns    (renderer.js:264:7)
+    at appendText  (renderer.js:292:5)   <-- appendText, twice, in one stack
+    at applyEvents (renderer.js:297:28)
+    at step        (renderer.js:377:9)   <-- the typewriter's rAF loop
+
+DOM state: { "inputDisabled": true, "renderedText": "…claude\nWel" }</pre>
+<p><code>appendText</code> appearing twice in one stack at two different line numbers is the whole story.</p>
+
+<h2>The root cause</h2>
+<p><code>renderer.js</code> declared <b>two different functions with the same name in the same scope</b>:</p>
+<pre>line 186:  function appendText(tgt, s)   // low-level: merge s into tgt's trailing text node
+line 287:  function appendText(str)      // high-level: micro-effects + auto-styling</pre>
+<p>Function declarations hoist, so the <b>later declaration wins for the entire scope</b> — silently, with no error. Every call meant for the low-level one:</p>
+<pre>softInto():   appendText(tgt, ch)    // line 206
+appendInto(): appendText(tgt, str)   // line 233</pre>
+<p>…actually invoked <code>appendText(str)</code>, handing a <b>DOM element</b> to a parameter named <code>str</code>. <code>microFx()</code> called <code>str.indexOf('!')</code> on it and threw. (It also made <code>appendInto</code> and <code>appendText</code> mutually recursive, which would have been the next problem.)</p>
+<p>The throw happened inside the typewriter's <code>requestAnimationFrame</code> loop, and that is what turned one bad call into two user-visible bugs:</p>
+<ul>
+<li>The <b>rAF chain died</b> — <code>step()</code> never scheduled its successor. Text stopped where it stopped.</li>
+<li><code>finalizeAssistant()</code> never ran, so <code>setBusy(false)</code> never ran → <code>input.disabled</code> stayed <code>true</code> forever.</li>
+<li><code>activeLine</code> stayed non-null, and <code>sendMessage()</code> opens with <code>if (!t || activeLine) return;</code> → <b>every subsequent prompt was silently refused</b>, even if the input had been typeable.</li>
+</ul>
+<p>Plain text worked right up until the first effect directive, which is why demo mode looked alive for exactly one word. The <code>{{fx:}}</code> directive is what opens a style span and routes text through the per-char path into <code>appendInto</code>.</p>
+
+<h2>The options, and what we picked</h2>
+<p>The one-line fix was never in question — rename the low-level function to <code>appendRaw</code>. The real decision was what to do about the fact that <b>this shipped twice</b>. I put four iteration options to Jim; he took two:</p>
+<table>
+<tr><th>Option</th><th>Decision</th></tr>
+<tr><td><b>Live-reload the UI from the VM</b> — the app loads its renderer over HTTP from the working tree, so a UI change is Ctrl-R, not a 148MB rebuild → download → extract.</td><td class="good">Taken</td></tr>
+<tr><td><b>Version stamp</b> — stamp each build with its git SHA and show it in the titlebar.</td><td class="good">Taken</td></tr>
+<tr><td><b>Browser F5 loop</b> — serve <code>src/</code> with a shim faking <code>window.api</code>, iterate in Chrome with no Electron at all.</td><td class="meta">Not taken — live-reload covers it with better fidelity</td></tr>
+<tr><td><b>5.4MB <code>app.asar</code> drop-in</b> instead of the 148MB zip.</td><td class="meta">Not taken for now — still the only path that covers <code>main.js</code>/<code>prompt.js</code> changes</td></tr>
+</table>
+<p>The smoke test wasn't optional and wasn't offered as a choice: without it the same class of bug ships again on the next build.</p>
+
+<h2>The fix</h2>
+<ul>
+<li><b><code>appendRaw(tgt, s)</code></b> — the low-level text-node merger is renamed, with a comment saying why the name must stay distinct. Callers at the two sites updated. <em>That is the entire behavioural fix.</em></li>
+<li><b><code>tools/smoke.js</code></b> (<code>npm run smoke</code>) — drives the real renderer, over the real preload, with the real demo stream, and fails on: any uncaught renderer error, raw <code>{{fx:}}</code> leaking as text, a reply that doesn't land whole, or an input that never re-enables. <code>prepackage:win</code> runs it, so <b>a broken build can no longer be packaged</b>.</li>
+<li><b><code>tools/stamp.js</code></b> (<code>npm run stamp</code>) — writes the git SHA into <code>src/build-info.js</code> + <code>build-info.json</code>; the titlebar shows it. Generated, never committed.</li>
+<li><b>Live UI</b> — <code>main.js</code> loads the renderer from <code>devUrl</code> / <code>FLOURISH_DEV_URL</code> when set; Ctrl-R and F12 bound explicitly (hiding the menu bar took the default reload accelerator with it). nginx serves <code>/flourish/</code> <code>no-store</code>, behind <code>tailnet-only.conf</code>.</li>
+</ul>
+<p>Only the UI moves to the VM. The SSH bridge, the private-key handling and the system prompt all stay in the packaged main process, so a live UI can never widen what the app is able to do.</p>
+
+<h2>Verification</h2>
+<p>The test that matters is that the new guard <b>fails on the code that shipped</b>. Re-introducing the duplicate name and running it:</p>
+<div class="two">
+<figure>
+  <figcaption><b class="bad">On the broken build — 9 failures, exit 1</b> (<a href="smoke-on-the-broken-build.txt">full output</a>)</figcaption>
+  <pre>FAIL - renderer logs no errors
+       Uncaught TypeError: str.indexOf is not
+       a function (renderer.js:281)
+FAIL - input is re-enabled after the reply
+ok   - no raw {{fx:}} directives leak
+FAIL - the whole reply lands, first to last
+FAIL - renders: "The quiet ones"
+FAIL - renders: "The working ones"
+FAIL - renders: "a nova"
+FAILED (9) — smoke</pre>
+</figure>
+<figure>
+  <figcaption><b class="good">On the fixed build — 10/10, exit 0</b> (<a href="smoke-on-the-fixed-build.txt">full output</a>)</figcaption>
+  <pre>ok   - renderer logs no errors
+ok   - input is re-enabled after the reply
+ok   - no raw {{fx:}} directives leak
+ok   - the whole reply lands, first to last
+ok   - renders: "The quiet ones"
+ok   - renders: "The working ones"
+ok   - renders: "a nova"
+PASSED — smoke</pre>
+</figure>
+</div>
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td><code>npm run smoke</code> (packaged files)</td><td class="good">10/10 · exit 0</td></tr>
+<tr><td><code>npm run smoke -- --url=http://100.76.34.62/flourish/</code> (what the app actually loads)</td><td class="good">10/10 · exit 0</td></tr>
+<tr><td><code>npm test</code></td><td class="good">88/88 (unchanged — it never saw this bug and still doesn't)</td></tr>
+<tr><td>nginx <code>/flourish/</code> from the tailnet IP</td><td class="good">200 · <code>Cache-Control: no-store</code></td></tr>
+<tr><td>nginx <code>/flourish/</code> from <code>127.0.0.1</code> — cloudflared's origin</td><td class="good">403 — not reachable from the public tunnel</td></tr>
+<tr><td>Effect vocabulary (<code>npm test</code>)</td><td class="good">50/50 taught by <code>prompt.js</code> — the repo was always consistent; the drift was the <b>build</b></td></tr>
+</table>
+<figure>
+  <img src="fig-after-fixed.png" alt="Flourish rendering the full demo showcase with aurora, constellation and particle effects">
+  <figcaption><b>The same demo reply, fixed.</b> The whole showcase lands — directives stripped, style spans applied (<code>neon</code>, <code>rainbow</code>, <code>shimmer</code>, <code>ghost</code>), point effects firing, and the prompt box re-enabled and focused at the bottom.</figcaption>
+</figure>
+<figure>
+  <img src="fig-build-stamp.png" alt="Flourish titlebar showing the build stamp e6d2907+ next to the app name">
+  <figcaption><b>The build stamp</b> (<code>e6d2907+</code>, top-left). <code>+</code> means uncommitted changes were in the tree when it was stamped. When the UI is served live off the VM it reads <code>ui &lt;sha&gt; · app &lt;sha&gt; · live</code> — two genuinely different commits, which is the point: the .exe embeds a copy of <code>src/</code> and <code>prompt.js</code>, so "what the repo says" and "what you're running" drift silently. A session once verified 40 effects against a build whose <code>prompt.js</code> predated the other 10.</figcaption>
+</figure>
+
+<h2>What to take from it</h2>
+<ul>
+<li><b>Two functions, one name, one scope, no error.</b> JS hoisting resolves it silently in favour of the later declaration. Nothing in the codebase would have flagged this — <code>'use strict'</code> doesn't, and there's no linter here. A linter with <code>no-redeclare</code> would have caught it for free, and is the obvious next cheap win.</li>
+<li><b>A throw inside a <code>requestAnimationFrame</code> callback kills the loop, not the app.</b> The UI half-dies and keeps running, which is why it presented as two unrelated cosmetic bugs rather than a crash.</li>
+<li><b>Green tests measured the wrong thing.</b> 88/88 passed on a build where the app rendered one word. Coverage of the pure modules said nothing about whether the thing boots. The smoke test is deliberately dumb and end-to-end for exactly that reason.</li>
+<li><b>A screenshot that exits 0 is not a test.</b> <code>npm run screenshot</code> cheerfully captured the broken app twice. It's a viewing tool; it now sits behind a guard that actually asserts.</li>
+</ul>
+</body></html>

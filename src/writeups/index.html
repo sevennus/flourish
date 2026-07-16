@@ -1,0 +1,87 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish — writeups</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0;margin-bottom:2px}
+  h1 .mark{color:#e0b54a;text-shadow:0 0 10px #e0b54a}
+  h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  a{color:#7dd3fc}
+  code{font-family:ui-monospace,monospace;font-size:0.92em}
+  .meta{color:#94a3b8;font-size:13px}
+  .lede{color:#a8c0d0;margin:14px 0 26px}
+  .card{display:block;background:#0c1825;border:1px solid #1e3850;border-radius:10px;
+        padding:14px 16px;margin:12px 0;text-decoration:none;transition:border-color .12s}
+  .card:hover{border-color:#e0b54a}
+  .card .t{color:#e2e8f0;font-weight:600;font-size:15.5px;line-height:1.4}
+  .card .d{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  .card .h{color:#a8c0d0;font-size:13.5px;margin-top:8px}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+  table{border-collapse:collapse;margin:12px 0;font-size:13px}
+  td,th{border:1px solid #26405a;padding:4px 10px;text-align:left}
+  th{color:#9fd5e6;background:#0e1c2a}
+  .back{display:inline-block;margin-bottom:18px;color:#94a3b8;text-decoration:none;font-size:13px}
+  .back:hover{color:#e0b54a}
+</style></head><body>
+
+<a class="back" href="../index.html">&larr; back to Flourish</a>
+
+<h1><span class="mark">✦</span> Flourish — writeups</h1>
+<p class="meta">Every bug that cost more than a minute, with the evidence used to find it.</p>
+
+<p class="lede">The standing rule on this VM is that a fix isn't done until there's a writeup:
+the symptom, how it was found, the root cause, the options, and the verification — with the
+<b>artifacts</b> that actually settled it, not just prose about them. These are Flourish's own.
+They live in this repo and ship with it, so the app carries its own history rather than
+borrowing SimJim's.</p>
+
+<h2>Writeups</h2>
+
+<a class="card" href="apophenia-invisible-strikethrough/index.html">
+  <div class="t">apophenia drew a line through the prose, and its screenshot was of a code path nobody ever runs</div>
+  <div class="d">2026-07-16 · shipped broken in <code>852d95c</code> · <code>flourish.js</code>, <code>effects.js</code>, <code>tools/fx-shots.js</code></div>
+  <div class="h">Jim asked to see the effect three times while I narrated a constellation it was never
+  drawing. The committed reference shot was a beautiful photograph of the fallback path. The
+  engine was healthy the whole time and drew exactly what it was told — the sampling guaranteed
+  a straight line.</div>
+</a>
+
+<a class="card" href="flourish-dead-renderer/index.html">
+  <div class="t">every reply died after its first word, and the prompt box never came back</div>
+  <div class="d">2026-07-16 · fixed in <code>87ff19d</code> · <code>renderer.js</code></div>
+  <div class="h">Two functions named <code>appendText</code> in one scope. Declarations hoist, the
+  later one silently wins, and the throw landed inside the typewriter's rAF loop — which is why
+  one line caused both symptoms at once. 88 green tests never touched it.</div>
+</a>
+
+<h2>⚠ Reading the SHAs</h2>
+<p>Flourish moved out of the SimJim tree on <b>2026-07-16</b> into its own repo
+(<a href="https://github.com/sevennus/flourish">github.com/sevennus/flourish</a>). The move used
+<code>git subtree split</code>, so all 21 commits kept their content and messages but were
+<b>rewritten to new SHAs</b>.</p>
+<p>Writeups above were authored before the split and cite <b>SimJim SHAs</b>. Those commits still
+exist in SimJim's history — only the files moved — so the references remain resolvable there.
+Writeups from the split onward cite <b>Flourish SHAs</b>. Both are valid; they just point at
+different repos. Commit messages are unchanged across the split, so a message is the reliable
+way to match one to the other:</p>
+<table>
+<tr><th>SimJim</th><th>Flourish</th><th>Commit</th></tr>
+<tr><td><code>4f1ca94</code></td><td><code>422cc47</code></td><td>Lightning that grows, strikes words, and sets them alight</td></tr>
+<tr><td><code>f3eedff</code></td><td><code>73fc9e4</code></td><td>apophenia never once drew a web</td></tr>
+<tr><td><code>ba15bc1</code></td><td><code>d9e240b</code></td><td>rot: text that won't sit still</td></tr>
+<tr><td><code>852d95c</code></td><td><code>b67ffc6</code></td><td>Eight effects that lie</td></tr>
+<tr><td><code>87ff19d</code></td><td><code>32441b8</code></td><td>Fix the dead renderer</td></tr>
+<tr><td><code>a1d59b6</code></td><td><code>4724730</code></td><td>Flourish runs on the VM now</td></tr>
+</table>
+<p class="meta">Full map: <code>git -C /var/www/flourish log --format='%h %s'</code> against
+<code>git -C /var/www/simjim log --format='%h %s'</code>, matched on the message.</p>
+
+<h2>Where these are served</h2>
+<p>Static files under <code>src/</code>, served by <code>server.js</code> at
+<code>/flourish/writeups/index.html</code> — behind the same tailnet-only fence as the app
+itself, because it is the same location block. No <code>server.js</code> change was needed to
+publish them, which also means <b>no restart</b>: editing a writeup is a browser reload.</p>
+<p class="meta">Directory URLs don't resolve — <code>serveStatic</code> has no index fallback, so
+link to <code>&lt;slug&gt;/index.html</code> explicitly, as the cards above do.</p>
+
+</body></html>

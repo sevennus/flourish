@@ -1,0 +1,23 @@
+ok 3 - anchorsFlat: the anchor set that actually shipped is rejected
+ok 4 - anchorsFlat: too few points to argue from
+ok 5 - anchorsFlat: a column of words is as degenerate as a row
+ok 6 - anchorsFlat: a genuine two-dimensional spread is accepted
+ok 7 - stratifyAnchors: picks across lines, not one line-ful
+ok 8 - stratifyAnchors: the regression — never returns a collinear set from a 2-D pool
+ok 9 - stratifyAnchors: one line of transcript still yields a flat set, and the engine must fall back
+ok 10 - stratifyAnchors: returns real candidates, never duplicates or inventions
+ok 11 - stratifyAnchors: asking for more than exists returns everything, and terminates
+ok 12 - stratifyAnchors: empty pool
+ok 13 - pairShallow: a same-line pair is the flat case of a shallow one
+ok 14 - pairShallow: adjacent lines, far apart — the ~5° graze along the prose
+ok 15 - pairShallow: steep links are kept, however short or long
+ok 16 - pairShallow: symmetric, and a coincident pair is shallow not NaN
+ok 17 - planApopheniaPairs: never draws a line that travels along the prose
+ok 18 - planApopheniaPairs: still finds enough lines to argue with
+ok 19 - planApopheniaPairs: no pair twice, and no point linked to itself
+ok 20 - planApopheniaPairs: lines draw one after another, not all at once
+ok 21 - planApopheniaPairs: a single line of anchors yields no pairs rather than a strikethrough
+ok 22 - planApopheniaPairs: terminates on hostile input
+# tests 143
+# pass 143
+# fail 0

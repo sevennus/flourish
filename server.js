@@ -71,6 +71,13 @@ const TYPES = {
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8',
   '.woff2': 'font/woff2', '.ico': 'image/x-icon',
+  // Writeup evidence — probe dumps, smoke output, test lists. Without these the
+  // fallback below is application/octet-stream, which makes the browser DOWNLOAD
+  // the artifact instead of showing it. nginx served these as text/plain from its
+  // own mime.types when the writeups lived in the SimJim tree, so the move here
+  // would have silently regressed every piece of evidence to a file save dialog.
+  '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
+  '.csv': 'text/plain; charset=utf-8',
 };
 
 function serveStatic(req, res, urlPath) {

@@ -167,7 +167,7 @@ test('planConfab sends "I" back to a capital', () => {
 // span silently rewrote one character of it.
 const MUST_NOT_TOUCH = [
   'rm -rf /var/www',
-  '/var/www/simjim/apps/flourish',
+  '/var/www/flourish',
   '127.0.0.1:3000',
   'git reset --hard origin/main',
   'npm run smoke:web',
