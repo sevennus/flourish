@@ -425,11 +425,18 @@
   let busy = false;
   const pending = [];   // typed while a reply was streaming; sent in order after
 
+  const PLACEHOLDER_IDLE = 'Type a message and press Enter…';
+  const PLACEHOLDER_BUSY = 'Type to queue the next prompt · Esc to interrupt';
+
   function setBusy(b) {
     busy = b;
     sendBtn.textContent = b ? 'stop' : 'send';
     sendBtn.classList.toggle('stop', b);
     sendBtn.title = b ? 'Interrupt (Esc)' : 'Send (Enter)';
+    // The box being live mid-reply is useless if nobody knows it. The
+    // placeholder is the one bit of copy you're already looking at when you
+    // wonder whether you can type — so it, not a tooltip, says what's possible.
+    input.placeholder = b ? PLACEHOLDER_BUSY : PLACEHOLDER_IDLE;
     if (!b) input.focus();
   }
 
