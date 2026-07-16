@@ -89,6 +89,20 @@
     }
   }
 
+  // Refresh / close / navigate away: tell the server NOW rather than let it
+  // discover it on the next heartbeat. fetch() is cancelled the instant the page
+  // goes, so it can't do this — sendBeacon is handed to the browser to deliver
+  // after we're gone. The heartbeat still backstops everything sendBeacon can't
+  // cover (crash, network drop, sleep).
+  window.addEventListener('pagehide', () => {
+    for (const requestId of inflight.keys()) {
+      try {
+        navigator.sendBeacon(api('abort'),
+          new Blob([JSON.stringify({ requestId })], { type: 'application/json' }));
+      } catch { /* leaving anyway; the heartbeat will get it */ }
+    }
+  });
+
   window.flourishAPI = {
     getConfig: () => getJSON('config'),
     saveConfig: (cfg) => postJSON('config', cfg),

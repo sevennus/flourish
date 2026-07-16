@@ -115,6 +115,21 @@ function streamDemo(res, requestId, text) {
   tick();
 }
 
+// Kill the whole process group, not just `claude`. Claude Code spawns its own
+// children (bash, ripgrep, editors); SIGTERM to the parent alone can leave those
+// running and, worse, leave the model's turn in flight. detached:true above puts
+// the child in its own group so a negative PID can't reach back and kill US.
+function killTree(child) {
+  if (!child || child.exitCode !== null || child.signalCode) return;
+  try { process.kill(-child.pid, 'SIGTERM'); }
+  catch { try { child.kill('SIGTERM'); } catch {} }
+  // If it hasn't gone in 4s, stop asking.
+  const t = setTimeout(() => {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+  }, 4000);
+  t.unref();
+}
+
 function runClaude(res, requestId, userText, cfg) {
   const args = buildArgs(userText, cfg, lastSessionId);
   let child;
@@ -124,18 +139,38 @@ function runClaude(res, requestId, userText, cfg) {
       // stdin closed, or Claude Code waits 3s for input that never comes —
       // the same reason the SSH path appends `< /dev/null`.
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Own process group, so killTree() can take the tool subprocesses with it.
+      detached: true,
     });
   } catch (e) {
     send(res, { t: 'error', message: 'could not start claude: ' + e.message });
     res.end(); return;
   }
 
+  // HEARTBEAT — the load-bearing part of noticing you left.
+  //
+  // nginx only discovers a dead client when it tries to WRITE to it. While
+  // Claude Code thinks or runs tools it emits nothing for minutes, so nginx
+  // never writes, never notices, and never closes the upstream connection —
+  // meaning this process never hears about it either. Measured: a run abandoned
+  // at 6s was still burning CPU and tokens 54s later, invisibly, with nobody
+  // watching the output.
+  //
+  // A ping every 3s gives nginx something to fail to deliver, which collapses
+  // the whole chain: nginx drops upstream → res 'close' fires → killTree().
+  // webapi.js ignores unknown event types, so this costs the client nothing.
+  const hb = setInterval(() => {
+    if (!res.writableEnded) send(res, { t: 'ping' });
+  }, 3000);
+  hb.unref();
+  const stopHb = () => clearInterval(hb);
+
   const lb = new LineBuffer();
   const toolByIndex = new Map();
   let stderr = '';
   let gotDone = false;
 
-  active.set(requestId, { abort: () => { try { child.kill('SIGTERM'); } catch {} } });
+  active.set(requestId, { abort: () => { stopHb(); killTree(child); } });
 
   const handle = (obj) => {
     for (const ev of translate(obj)) {
@@ -158,6 +193,7 @@ function runClaude(res, requestId, userText, cfg) {
   child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
   child.on('error', (e) => { send(res, { t: 'error', message: 'claude failed to start: ' + e.message }); });
   child.on('close', (code) => {
+    stopHb();
     for (const o of lb.flush()) handle(o);
     active.delete(requestId);
     if (!gotDone) {
@@ -221,7 +257,20 @@ const server = http.createServer(async (req, res) => {
         'Cache-Control': 'no-store',
         'X-Accel-Buffering': 'no',   // or nginx buffers the stream and the typewriter arrives all at once
       });
-      req.on('close', () => { const a = active.get(requestId); if (a) { a.abort(); active.delete(requestId); } });
+      // You closed the tab, hit refresh, dropped off the network, or shut the
+      // laptop: stop the work. On RES, not req — req 'close' can fire as soon as
+      // the request body has been read, which would kill every run the moment it
+      // started. writableEnded distinguishes "client vanished" from "we finished
+      // and closed it ourselves".
+      res.on('close', () => {
+        if (res.writableEnded) return;              // normal completion
+        const a = active.get(requestId);
+        if (a) {
+          a.abort();
+          active.delete(requestId);
+          console.log(`[abandoned] ${requestId} — client gone, killed the run`);
+        }
+      });
       if (cfg.demoMode) streamDemo(res, requestId, text);
       else runClaude(res, requestId, text, cfg);
       return;
@@ -245,3 +294,18 @@ server.listen(PORT, HOST, () => {
   const cfg = loadConfig();
   console.log(`Flourish web on http://${HOST}:${PORT}  (cwd ${cfg.cwd}, ${cfg.demoMode ? 'demo' : 'live'})`);
 });
+
+// A restart must not strand a run. detached:true puts each claude in its own
+// process group, which is exactly what stops systemd's KillMode from reaping
+// them for us — so do it explicitly.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    for (const [id, a] of active) {
+      console.log(`[shutdown] killing ${id}`);
+      try { a.abort(); } catch {}
+    }
+    active.clear();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  });
+}
