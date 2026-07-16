@@ -57,7 +57,7 @@
     transcript.appendChild(line); scrollToEnd();
     return body;
   }
-  function plainLine(cls, text) { addLine(cls).textContent = text; scrollToEnd(); }
+  function plainLine(cls, text) { const n = addLine(cls); n.textContent = text; scrollToEnd(); return n; }
 
   // The transcript is followed by a critically damped spring rather than pinned
   // with `scrollTop = scrollHeight`. The target moves while we chase it (text is
@@ -351,6 +351,7 @@
     if (!activeLine.body.textContent.trim() && activeLine.body.parentNode) activeLine.body.parentNode.remove();
     activeLine = null; setBusy(false); scrollToEnd();
     idle.kick();
+    drainPending();   // anything typed while that reply ran goes now, in order
   }
 
   // ---------- typewriter over the unified queue ----------
@@ -413,25 +414,103 @@
   })();
 
   // ---------- send / receive ----------
-  function setBusy(b) { input.disabled = b; sendBtn.disabled = b; if (!b) input.focus(); }
+  //
+  // THE INPUT IS NEVER DISABLED. It used to be locked for the whole reply, and
+  // with real Claude Code running tools that's minutes of a dead box — you
+  // couldn't queue a follow-up or take back a bad prompt, which is exactly what
+  // the CLI lets you do. Worse, every way the stream could break (an exception
+  // in the rAF loop, a done event that never came) left it locked forever with
+  // no way out. Never disabling it means there is no state in which the app can
+  // strand you.
+  let busy = false;
+  const pending = [];   // typed while a reply was streaming; sent in order after
 
-  function sendMessage(text) {
-    const t = text.trim();
-    if (!t || activeLine) return;
-    plainLine('user', t);
+  function setBusy(b) {
+    busy = b;
+    sendBtn.textContent = b ? 'stop' : 'send';
+    sendBtn.classList.toggle('stop', b);
+    sendBtn.title = b ? 'Interrupt (Esc)' : 'Send (Enter)';
+    if (!b) input.focus();
+  }
+
+  function dispatch(t, queuedNode) {
+    if (queuedNode) queuedNode.classList.remove('queued');
+    else plainLine('user', t);
     const reqId = 'r' + (++reqCounter);
-    setBusy(true); startAssistant(reqId);
+    setBusy(true);
+    startAssistant(reqId);
     api.send({ requestId: reqId, text: t });
     idle.kick();
   }
 
+  function sendMessage(text) {
+    const t = text.trim();
+    if (!t) return;
+    // Mid-reply: queue it rather than swallow it. Showing the line immediately
+    // (dimmed) is the point — a keystroke that vanishes reads as a broken box,
+    // which is how this whole mess started.
+    if (activeLine) {
+      // plainLine hands back the .body; the marker styles the whole .line.
+      const node = plainLine('user', t).closest('.line');
+      node.classList.add('queued');
+      pending.push({ t, node });
+      return;
+    }
+    dispatch(t, null);
+  }
+
+  function drainPending() {
+    if (activeLine || !pending.length) return;
+    const next = pending.shift();
+    dispatch(next.t, next.node);
+  }
+
+  // Esc = interrupt, like the CLI. Stops the run where it is, keeps what
+  // arrived, and hands the prompt straight back without waiting for the server
+  // to acknowledge — a stop that needs a round-trip doesn't feel like a stop.
+  function interrupt() {
+    if (!activeLine) return false;
+    try { api.abort(activeLine.id); } catch (e) { console.error('abort failed', e); }
+    applyEvents(activeLine.parser.flush());
+    flushAuto();
+    if (activeLine.caret && activeLine.caret.parentNode) activeLine.caret.remove();
+    if (!activeLine.body.textContent.trim() && activeLine.body.parentNode) activeLine.body.parentNode.remove();
+    activeLine = null;
+    setBusy(false);
+    plainLine('system', '⎋ interrupted');
+    effects.fire('glitch', undefined, undefined, { scale: 0.4 });
+    idle.kick();
+    drainPending();
+    return true;
+  }
+
+  function clearPending() {
+    if (!pending.length) return false;
+    for (const p of pending) if (p.node && p.node.parentNode) p.node.parentNode.remove();
+    pending.length = 0;
+    plainLine('system', '⎋ queued prompts cleared');
+    return true;
+  }
+
   input.addEventListener('input', () => idle.kick());
+
+  // Esc anywhere: stop the run, or clear the queue if nothing is running.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (interrupt() || clearPending()) e.preventDefault();
+  });
+
+  // While busy the button is a stop button. Handled on click (not submit) so it
+  // can cancel the form submission that a <button type="submit"> would fire.
+  sendBtn.addEventListener('click', (e) => {
+    if (busy) { e.preventDefault(); interrupt(); }
+  });
 
   inputRow.addEventListener('submit', (e) => {
     e.preventDefault();
     const v = input.value;
     // Spend the typing heat while the caret is still where you left it.
-    if (v.trim() && !activeLine) inputFX.launch();
+    if (v.trim()) inputFX.launch();
     input.value = '';
     sendMessage(v);
   });
@@ -458,6 +537,7 @@
     effects.fire('glitch');
     effects.fire('shake');
     idle.kick();
+    drainPending();
   });
 
   api.onAuto((d) => { plainLine('user', d.userText || ''); setBusy(true); startAssistant(d.requestId); });
@@ -607,12 +687,8 @@
 
   // ---------- boot ----------
   (async function boot() {
-    // boot now awaits the network (config + build), so there's a real window in
-    // which someone can type and hit Enter before we've said hello — the reply
-    // then lands ABOVE the greeting. Hold the prompt until we're ready.
-    // try/finally, not a plain re-enable: an exception here must not leave the
-    // input disabled forever. That is exactly how the last two builds failed.
-    setBusy(true);
+    // Boot awaits the network, but it must never gate the input: type during
+    // boot and the message queues like any other. Nothing here touches busy.
     try {
       cfg = await api.getConfig();
       await showBuild();        // sets isWeb, which the lines below read
@@ -620,12 +696,6 @@
       console.error('boot failed', e);
       plainLine('error', '⚠ Could not reach the server: ' + ((e && e.message) || e));
       cfg = cfg || {};
-    } finally {
-      // Only hand the prompt back if nothing is using it. Someone can submit
-      // while boot is still awaiting the network, and an unconditional
-      // setBusy(false) here re-enables the input in the middle of that reply —
-      // clobbering the busy state sendMessage() just set.
-      if (!activeLine) setBusy(false);
     }
     setStatus('idle');
     const configured = cfg.demoMode || isWeb || (cfg.host && cfg.username);

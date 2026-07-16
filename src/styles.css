@@ -188,6 +188,22 @@ body {
 }
 #send-btn:hover { filter: brightness(1.1); }
 #send-btn:disabled { opacity: 0.4; cursor: default; }
+/* While the model is talking the button stops it. Red, because it's the one
+   control here that throws work away. */
+#send-btn.stop {
+  background: #4a1520; color: #ff9db0;
+  box-shadow: 0 0 0 1px #7d2436 inset;
+}
+
+/* Typed while a reply was still streaming: shown immediately so a keystroke
+   never just vanishes, dimmed until it's actually sent. */
+.line.user.queued .body { opacity: 0.45; }
+/* Plain text, no emoji: the bundled mono font has no glyph for ⏳ and it lands
+   as a tofu box. Same trap as the katakana in the matrix effect. */
+.line.user.queued .body::after {
+  content: " · queued";
+  color: var(--fg-dim); font-size: 11px; letter-spacing: 0.4px;
+}
 
 /* ---- text-style flourishes ---- */
 .fx-shimmer {

@@ -16,11 +16,12 @@
     "presmoke": "npm run stamp",
     "smoke": "xvfb-run -a electron tools/smoke.js --no-sandbox",
     "smoke:web": "xvfb-run -a electron tools/smoke.js --no-sandbox --web --url=http://100.76.34.62/flourish/",
+    "test:interactive": "xvfb-run -a electron tools/interactive.js --no-sandbox",
     "prescreenshot": "npm run stamp",
     "screenshot": "xvfb-run -a electron . --screenshot --no-sandbox",
     "fx-shots": "xvfb-run -a electron tools/fx-shots.js --no-sandbox",
     "fx-bench": "xvfb-run -a electron tools/fx-bench.js --no-sandbox",
-    "prepackage:win": "npm run stamp && npm run smoke",
+    "prepackage:win": "npm run stamp && npm run smoke && npm run test:interactive",
     "package:win": "electron-packager . Flourish --platform=win32 --arch=x64 --out=dist --overwrite --app-version=0.1.0 --prune=true"
   },
   "devDependencies": {

@@ -134,11 +134,19 @@ async function main() {
     win.webContents.send('chat:done', { requestId });
   }
 
-  // The reply is finished when the renderer hands the prompt back.
+  // The reply is finished when the button stops offering to stop it.
+  //
+  // This used to poll `!input.disabled`, which was wrong twice over. The input
+  // is never disabled now (you must be able to type and interrupt mid-reply),
+  // so it reads true instantly and the transcript gets checked mid-stream. And
+  // when it DID work, it was asserting the very thing Jim was complaining
+  // about — "input re-enabled after the reply" passed green for days while the
+  // box was dead for the entire reply, which is what he actually meant.
   const deadline = Date.now() + (WEB ? 45000 : 25000);
   let ready = false;
   while (Date.now() < deadline) {
-    ready = await win.webContents.executeJavaScript('!document.getElementById("input").disabled');
+    ready = await win.webContents.executeJavaScript(
+      'document.getElementById("send-btn").textContent.trim() === "send"');
     if (ready) break;
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -150,7 +158,11 @@ async function main() {
   console.log('');
   check(consoleErrors.length === 0, 'renderer logs no errors' +
     (consoleErrors.length ? '\n       ' + consoleErrors.slice(0, 5).join('\n       ') : ''));
-  check(ready, 'input is re-enabled after the reply (you can type the next prompt)');
+  check(ready, 'the reply finishes and the button returns to "send"');
+  // Interaction is interactive.test.js's job — it drives the box mid-reply,
+  // which is the thing this file was quietly getting wrong.
+  check(await win.webContents.executeJavaScript('!document.getElementById("input").disabled'),
+    'the input is never left disabled');
   check(!/\{\{fx:|\{\{\/fx:/.test(text), 'no raw {{fx:}} directives leak into the transcript');
 
   // The showcase's last words. If the stream dies partway, this is what tells
