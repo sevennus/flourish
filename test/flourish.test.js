@@ -336,6 +336,21 @@ test('the unreliable spans are taught with their guardrail', () => {
     'the prompt must scope the unreliable spans away from load-bearing text');
 });
 
+test('the unreliable spans are not rationed', () => {
+  // Jim, twice, on 2026-07-16: "you can definitely do more than one mutate span
+  // per reply… dont be afraid to show many. like 'load up the effects'."
+  //
+  // The prompt used to cap them at one per reply, which is why they'd only ever
+  // been seen one at a time. The cap is a judgement call, not a safety rule —
+  // the safety rule is mutableMask(), and it's enforced in code, not in prose.
+  // This test exists so the cap can't drift back in on the grounds that it
+  // sounds prudent. If it should return, it should return because Jim says so.
+  assert.doesNotMatch(FLOURISH_SYSTEM_PROMPT, /at most one unreliable/i,
+    'the one-per-reply cap on unreliable spans was removed deliberately');
+  assert.match(FLOURISH_SYSTEM_PROMPT, /LOAD THEM UP/,
+    'the prompt must actively invite the unreliable spans, not merely permit them');
+});
+
 test('the mutating spans actually consult the guard', () => {
   // The guard is the reason a careless unreliable span degrades to doing
   // nothing instead of to lying about a command. mutableMask() being correct
