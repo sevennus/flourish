@@ -1,32 +1,35 @@
 # Flourish
 
-A PuTTY-style Windows terminal that **SSHes into your VM and drives Claude Code
-there**, streaming its output back and **painting visual flourishes** the model
-directs inline.
+A terminal that **drives Claude Code and paints the visual flourishes the model
+directs inline** — its normal working replies arrive lit up.
 
-It is a real SSH client (via `ssh2`). Nothing is installed or run on the VM
-beyond the `claude` you already have — Flourish just logs in and runs it
-headless. Your Anthropic auth stays on the VM; only SSH credentials live in this
-app.
+**It is a web app.** It runs on this VM under systemd and you open it in a
+browser:
+
+> **http://100.76.34.62/flourish/**
+
+Your Anthropic auth is whatever `claude` already has on this box. Nothing is
+installed on Windows, and no credentials live in the app.
 
 ![what it looks like](assets/screenshot.png)
 
 ## How it works
 
 ```
-Windows app ──SSH──▶ Ubuntu VM ──▶ claude -p --output-format stream-json
-   (ssh2)                           (Claude Code, real tools on the VM)
-      ▲                                    │
-      └──────── text deltas + tool events ─┘  → typewriter + flourishes
+Browser (Windows) ──HTTP/NDJSON──▶ server.js on the VM
+  paints every pixel                     │ spawn()
+  on your GPU                            ▼
+      ▲                     claude -p --output-format stream-json
+      └──── text deltas + tool events ───┘  → typewriter + flourishes
 ```
 
-Per message, Flourish runs (roughly):
+Per message, the server spawns (roughly):
 
 ```
-bash -lc "cd <project> && claude -p '<your message>' \
+claude -p '<your message>' \
   --output-format stream-json --verbose --include-partial-messages \
   --append-system-prompt '<flourish protocol>' \
-  --resume <session-id> --permission-mode bypassPermissions < /dev/null"
+  --resume <session-id> --permission-mode bypassPermissions
 ```
 
 - **`--resume <session-id>`** keeps the conversation going — context lives in the
@@ -36,11 +39,30 @@ bash -lc "cd <project> && claude -p '<your message>' \
 - **`--permission-mode bypassPermissions`** (the "bypass / dangerous" toggle)
   lets Claude Code run tools without prompting. Turn it off in settings to be
   asked-per-tool instead (headless, so an un-approved tool just errors).
-- **`bash -lc`** ensures `claude` is on `PATH` over a non-login SSH exec;
-  **`< /dev/null`** avoids Claude Code's 3-second wait for stdin.
+- **stdin is closed** (`stdio: ['ignore', …]`), or Claude Code waits 3 seconds
+  for input that never comes.
+
+Events stream back as **one NDJSON line per event, on the POST response itself**
+— not EventSource, which is GET-only, and a prompt doesn't belong in a URL.
 
 Tool calls (Read, Bash, Edit, …) show up as dim `⚙ Tool` lines that flip to
 `✓ Tool` when they finish, and a spark fires each time one starts.
+
+### The legacy Electron path
+
+A packaged Windows `.exe` also exists, and it reaches the VM over **SSH** (via
+`ssh2`) instead of HTTP. It wraps its command in
+`bash -lc "cd <project> && … < /dev/null"` — `bash -lc` to get `claude` on `PATH`
+over a non-login SSH exec. See [Electron (legacy)](#two-ways-to-run-it) for why
+you probably don't want it.
+
+⚠️ **The two transports build that command with two different functions**, both in
+`src/bridge.js`: `buildArgs()` (an argv array, for `spawn` — web) and
+`buildInner()` (a shell string, `shq()`-quoted — SSH). They are *not* shared;
+one can't be, because quoting for a shell would embed literal quotes into
+`spawn`'s arguments. **They must teach the model the same vocabulary and they
+drift the moment you touch one and not the other** — a flag added to only
+`buildArgs()` is a flag the `.exe` silently never passes. Change both.
 
 ## The flourish protocol
 
@@ -200,12 +222,16 @@ own computed font on a scratch canvas.
 
 ## Requirements
 
-- **On the VM:** Claude Code (`claude`) installed and authenticated, and SSH
-  access (key or password). That's it — no server to run.
-- **To build/develop:** Node.js 18+ and npm.
+- **On the VM:** Node.js 18+ and Claude Code (`claude`) installed and
+  authenticated. `server.js` uses only Node built-ins, so the web app needs no
+  `npm install` at all.
+- **On Windows:** a browser. Nothing else.
+- **To develop, or to build the legacy `.exe`:** npm — `ssh2` (pure-JS) is the
+  only runtime dep, and it is used *only* by the Electron/SSH path; Electron
+  itself is a devDependency.
 
 ```bash
-npm install        # ssh2 (pure-JS) is the only runtime dep
+npm install
 ```
 
 ## Two ways to run it
@@ -257,25 +283,38 @@ Run it in the foreground instead:
 npm run web        # node server.js on 127.0.0.1:8787
 ```
 
-The Electron app:
+The web app needs no connection setup — the server is already where `claude`
+lives. **⚙ settings** covers the working directory, model, the bypass toggle,
+and **Demo mode** (scripted replies, no `claude` — the effects with nothing
+behind them).
+
+The legacy Electron app:
 
 ```bash
 npm start          # launches the Electron app
 ```
 
-Open **⚙ settings**, enter your VM's host/IP (Tailscale IP works), username, and
-SSH key (or password), optionally a working directory and model, then **Test
-connection**. Or tick **Demo mode** to see the effects with no VM. Close the
-window (or Ctrl-C the launching terminal) to stop.
+That one *does* need connection setup: open **⚙ settings**, enter your VM's
+host/IP (Tailscale IP works), username, and SSH key (or password), then **Test
+connection**. Close the window (or Ctrl-C the launching terminal) to stop.
 
-## The dev loop — iterating without rebuilding
+## The dev loop
+
+**On the web app there isn't one to speak of.** nginx serves `src/` straight off
+the working tree, so Claude edits a file and you hit reload. Only `server.js`
+changes need `sudo systemctl restart flourish`.
+
+That is the whole reason the web app exists, and the rest of this section is the
+archaeology of getting there.
+
+### Live UI (legacy Electron)
 
 A UI change used to cost a **148MB rebuild → download → extract**. That's a bad
 trade, because the renderer *is* the app: ~90% of Flourish is effects, CSS and
 DOM, and it's **208KB** of that 148MB zip. The rest is Chromium.
 
-So the app can load its UI **live off the VM** instead of from the copy baked
-into the `.exe`:
+So the `.exe` can load its UI **live off the VM** instead of from the copy baked
+into it:
 
 1. In **⚙ settings**, set **Live UI URL** to `http://100.76.34.62/flourish/`
    (the VM's Tailscale IP).
@@ -422,11 +461,24 @@ npx asar list dist/Flourish-win32-x64/resources/app.asar | grep src/
 
 ## Architecture
 
+Two hosts, one renderer. `src/` below the line doesn't know or care which one it
+is running under.
+
 ```
+── web (default) ────────────────────────────────────────────────────────
+server.js        Node built-ins only: serves src/, spawns claude locally,
+                 streams NDJSON events on the POST response. Demo mode too.
+src/webapi.js    window.flourishAPI over fetch — the browser's stand-in for
+                 preload.js. NO privileged surface; this is what smoke:web runs.
+
+── electron (legacy) ────────────────────────────────────────────────────
 main.js          Electron main: SSH connection, runs claude, parses stream-json,
                  relays text deltas + tool events over IPC. Demo mode too.
 preload.js       contextBridge: the narrow window.flourishAPI surface.
-src/bridge.js    pure: ssh2 connect config + the remote command builder.
+src/bridge.js    pure: ssh2 connect config + buildArgs() — the claude invocation,
+                 shared with server.js — plus the SSH command wrapper.
+
+── shared ───────────────────────────────────────────────────────────────
 src/ccstream.js  pure: Claude Code stream-json → app events (+ line buffer).
 src/flourish.js  pure: streaming flourish-directive parser + arg grammar (UMD).
 src/autofx.js    pure: streaming auto-highlighter for code/bold/numbers (UMD).
@@ -435,9 +487,12 @@ src/textfx.js    the consuming spans (burn/cascade) — the one place the DOM te
 src/prompt.js    the flourish protocol appended to Claude Code's system prompt.
 src/effects.js   canvas particle engine + full-screen effects.
 src/inputfx.js   prompt-box typing sparks + the heat model.
+src/scroller.js  critically-damped spring that follows the typewriter's moving
+                 target (a tween or CSS smooth-scroll can't — the target moves).
 src/renderer.js  terminal UI + typewriter that interleaves text and tool events,
                  the tool→effect map, and the app's own ambient/status effects.
 src/demo.js      offline scripted responder (no VM needed).
+src/build-info.js  generated by tools/stamp.js — never committed.
 tools/fx-shots.js  visual verification harness (alternate Electron entry).
 tools/fx-bench.js  particle-budget benchmark (alternate Electron entry).
 ```

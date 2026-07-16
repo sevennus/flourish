@@ -89,3 +89,50 @@ test('buildCommand wraps the inner command in a login shell', () => {
   assert.ok(cmd.startsWith("bash -lc '"));
   assert.match(cmd, /claude/);
 });
+
+// ---------------------------------------------------------------------------
+// The two transports, kept honest.
+//
+// The web app spawns claude with an argv array (buildArgs); the legacy SSH path
+// builds a shell string (buildInner). They cannot be one function — quoting for
+// a shell would embed literal quotes into spawn's arguments — so they are two
+// implementations of one invocation, which is a standing invitation to drift.
+// The README claimed for a while that they were shared; they never were. A flag
+// added to only one is a flag the other silently never passes, and nothing else
+// in this repo would notice.
+test('both transports pass the same claude flags (they drift the moment you touch one)', () => {
+  const { buildArgs } = require('../src/bridge');
+
+  // Strip single-quoted values first: the system prompt is megabytes of prose
+  // and would otherwise contribute whatever "--foo" it happens to mention.
+  const flagsInShell = (s) =>
+    [...s.replace(/'(?:[^']|'\\'')*'/g, "''").matchAll(/(?:^|\s)(--[a-z-]+)/g)]
+      .map((m) => m[1]).sort();
+  const flagsInArgv = (a) => a.filter((x) => /^--[a-z-]+$/.test(x)).sort();
+
+  for (const cfg of [
+    { ...base },
+    { ...base, bypass: false },
+    { ...base, model: 'claude-opus-4-8' },
+    { ...base, cwd: '/var/www/simjim', model: 'claude-opus-4-8' },
+  ]) {
+    for (const sess of [null, 'sess-abc']) {
+      assert.deepStrictEqual(
+        flagsInArgv(buildArgs('hello', cfg, sess)),
+        flagsInShell(buildInner('hello', cfg, sess)),
+        `buildArgs and buildInner disagree for cfg=${JSON.stringify(cfg)} session=${sess}`
+      );
+    }
+  }
+});
+
+test('both transports teach the model the same vocabulary', () => {
+  const { buildArgs } = require('../src/bridge');
+  const { FLOURISH_SYSTEM_PROMPT } = require('../src/prompt');
+  const args = buildArgs('hi', base, null);
+  const i = args.indexOf('--append-system-prompt');
+  assert.ok(i !== -1, 'the web path must append the flourish prompt, or the model fires nothing');
+  assert.strictEqual(args[i + 1], FLOURISH_SYSTEM_PROMPT, 'unquoted: spawn takes the raw string');
+  assert.ok(buildInner('hi', base, null).includes(shq(FLOURISH_SYSTEM_PROMPT)),
+    'the SSH path must append the same prompt, quoted for the shell');
+});
