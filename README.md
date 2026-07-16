@@ -219,20 +219,99 @@ SSH key (or password), optionally a working directory and model, then **Test
 connection**. Or tick **Demo mode** to see the effects with no VM. Close the
 window (or Ctrl-C the launching terminal) to stop.
 
+## The dev loop — iterating without rebuilding
+
+A UI change used to cost a **148MB rebuild → download → extract**. That's a bad
+trade, because the renderer *is* the app: ~90% of Flourish is effects, CSS and
+DOM, and it's **208KB** of that 148MB zip. The rest is Chromium.
+
+So the app can load its UI **live off the VM** instead of from the copy baked
+into the `.exe`:
+
+1. In **⚙ settings**, set **Live UI URL** to `http://100.76.34.62/flourish/`
+   (the VM's Tailscale IP).
+2. **Restart Flourish once.** Which document loads is decided when the window is
+   created, so this one setting can't apply itself.
+3. From then on: **Ctrl-R** reloads the UI, **F12** opens devtools.
+
+Claude edits `src/` on the VM; you hit Ctrl-R. No download, no extract, and it's
+the real app — real SSH, real Claude Code, real system prompt.
+
+`FLOURISH_DEV_URL=http://…/flourish/ npm start` does the same without touching
+saved settings.
+
+**What this does and doesn't move.** Only the UI is served from the VM. The SSH
+bridge, the private-key handling and the system prompt stay in the packaged main
+process — a live UI can never widen what the app is able to do. nginx serves
+`/flourish/` `no-store` behind `snippets/tailnet-only.conf`: reachable from the
+tailnet/LAN, **403 from `127.0.0.1`**, which is where the Cloudflare tunnel
+connects from. A machine that can serve JavaScript to your desktop app is not a
+public surface.
+
+**What still needs a rebuild:** `main.js`, `preload.js`, `bridge.js` and
+`prompt.js` are main-process code. If Claude changes the effect vocabulary in
+`prompt.js`, the running `.exe` keeps the vocabulary it was built with — which
+is exactly the drift the build stamp exists to expose.
+
+### Which code am I running?
+
+The titlebar says so:
+
+| Stamp | Meaning |
+|---|---|
+| `e6d2907` | packaged UI, built from that commit |
+| `e6d2907+` | `+` = uncommitted changes were in the tree when it was stamped |
+| `ui a1b2c3d · app e6d2907 · live` | UI served live off the VM — **two different commits**. `ui` is what you're looking at; `app` is the shell that owns the SSH bridge and the system prompt. |
+
+Hover it for the full detail. `tools/stamp.js` writes this from git at
+`prestart`/`presmoke`/`prescreenshot`/`prepackage`, into `src/build-info.js` +
+`build-info.json` (generated, never committed).
+
+This exists because the `.exe` embeds a *copy* of `src/` and `prompt.js`, so the
+repo and the running code drift silently — a session once "verified" 40 effects
+against a build whose `prompt.js` predated the other 10. If you're serving the
+UI live, **run `npm run stamp` after edits** so the stamp keeps up.
+
 ## Test
 
 Pure-logic unit tests (parser, auto-highlighter, stream translator, command
 builder, and the vocabulary-vs-engine/CSS/prompt/tool-map seams):
 
 ```bash
-npm test           # node --test — 78 tests, no browser/VM needed
+npm test           # node --test — 88 tests, no browser/VM needed
 ```
 
-Headless GUI smoke test (renders the real UI under a virtual display → PNG):
+**These do not touch the renderer.** They passed 88/88 while the app rendered
+exactly one word of every reply (see *Smoke test* below). Green here means the
+parser and bridge are sound; it says nothing about whether the app boots.
+
+### Smoke test — does the app actually run?
+
+Drives the **real renderer** over the **real preload bridge** with the **real
+demo stream**, and fails on: any uncaught renderer error, raw `{{fx:}}`
+directives leaking as text, a reply that doesn't land whole, or an input that
+never re-enables.
+
+```bash
+npm run smoke                                        # the files in this checkout
+npm run smoke -- --url=http://100.76.34.62/flourish/ # what the live UI serves
+```
+
+The `--url` form matters once you're using the dev loop: "works in the checkout"
+and "works in Jim's window" become different claims, and only the second is the
+one he experiences.
+
+`prepackage:win` runs this, so **a broken build can't be packaged**.
+
+### Screenshot — a viewing tool, not a test
 
 ```bash
 npm run screenshot           # needs xvfb; writes ./flourish-screenshot.png
 ```
+
+It renders the real UI to a PNG and **exits 0 regardless of what's in the PNG**.
+It photographed a fatally broken app twice without complaint. Use it to look at
+things; use `npm run smoke` to know they work.
 
 Visual proof of every effect — fires each one in the real renderer and captures
 it mid-flight to `assets/fx/<name>.png`:
