@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const { FlourishParser, PER_CHAR_SPANS, CONSUMING_SPANS, parseArgs } = window.Flourish;
+  const { FlourishParser, PER_CHAR_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, parseArgs } = window.Flourish;
   const { AutoStyler } = window.AutoFX;
   const api = window.flourishAPI;
   const el = (id) => document.getElementById(id);
@@ -88,6 +88,11 @@
       parser: new FlourishParser(), reveal: '', queue: [],
       stack: [seg.body], streamDone: false, waveN: 0, tools: new Map(),
       auto: new AutoStyler(), autoCls: null, autoNode: null,
+      // dilate: when the typewriter is holding, and what it owes the reader once
+      // it starts again. Both live on the LINE rather than in module scope so
+      // they can't outlive the reply that asked for them — a stall stranded
+      // across replies would look exactly like the app having hung.
+      stallUntil: 0, pending: null,
     };
     ensureTyping();
   }
@@ -106,11 +111,12 @@
     while (activeLine.stack.length > 1) {
       const top = activeLine.stack.pop();
       if (top.dataset && top.dataset.fx === name) {
-        // A consuming span can only run once all its characters exist, which is
+        // A scripted span can only run once all its characters exist, which is
         // exactly now: the closing directive has arrived, so the span is
         // complete. (Igniting as characters streamed in would set fire to a
-        // word that hadn't finished being typed.)
-        if (CONSUMING_SPANS.has(name)) textFX.play(name, top, top.dataset.fxArgs || '');
+        // word that hadn't finished being typed; rewriting one would swap a word
+        // that wasn't done arriving.)
+        if (SCRIPTED_SPANS.has(name)) textFX.play(name, top, top.dataset.fxArgs || '');
         break;
       }
     }
@@ -155,9 +161,14 @@
   }
 
   // Spans whose per-character animation is pure CSS and just needs staggering.
-  // burn and cascade are absent on purpose: textfx.js drives those from JS once
-  // the span closes, and a CSS animation would fight it.
-  const CSS_STAGGERED = new Set(['wave', 'bounce', 'stamp', 'corrupt', 'sparkle']);
+  // The scripted spans (burn, cascade, rot, confabulate, intrusive, overwrite)
+  // are absent on purpose: textfx.js drives those from JS once the span closes,
+  // and a CSS animation would fight it.
+  //
+  // twin is here because its desync is exactly a stagger: every character's
+  // ghost runs the same drift at its own phase, and that phase spread is what
+  // pulls the second copy apart letter by letter instead of sliding it off whole.
+  const CSS_STAGGERED = new Set(['wave', 'bounce', 'stamp', 'corrupt', 'sparkle', 'twin']);
 
   // ---------- soft character reveal ----------
   // Characters ease up into place instead of popping. Three constraints shape
@@ -241,6 +252,10 @@
       i.textContent = ch;
       if (CSS_STAGGERED.has(fx)) {
         i.style.animationDelay = ((activeLine.waveN++ % 24) * 0.05).toFixed(2) + 's';
+        // twin's ghost is a pseudo-element, and a pseudo-element can only read
+        // text out of an attribute — content:attr(data-c) is the only way to
+        // duplicate a glyph without a second real node per character.
+        if (fx === 'twin') i.dataset.c = ch;
       } else if (fx === 'scramble') {
         scrambleIn(i, ch);
       } else if (fx === 'hexdump') {
@@ -295,10 +310,69 @@
     emitRuns(activeLine.auto.feed(str));
   }
 
+  // How long the typewriter holds for a {{fx:dilate}}, before its size arg.
+  // Long enough to be felt as a pause rather than a stutter, short enough that
+  // nobody reaches for the mouse to see whether it died.
+  const DILATE_MS = 850;
+
+  // Where the words currently on screen are, for apophenia to hang its lines on.
+  // The engine never reads the DOM (see the header of effects.js) — the renderer
+  // owns the text, so it measures, and hands the engine bare coordinates.
+  //
+  // One Range per word would be a layout read per word, so this samples: at most
+  // MAX words, taken from the tail of the transcript, which is what's on screen.
+  function wordAnchors(max) {
+    const out = [];
+    const walk = document.createTreeWalker(transcript, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walk.nextNode()) nodes.push(walk.currentNode);
+    const range = document.createRange();
+    const top = screen.getBoundingClientRect().top;
+    for (let i = nodes.length - 1; i >= 0 && out.length < max; i--) {
+      const text = nodes[i].nodeValue;
+      const re = /[A-Za-z]{3,}/g;
+      let m;
+      while ((m = re.exec(text)) !== null && out.length < max) {
+        range.setStart(nodes[i], m.index);
+        range.setEnd(nodes[i], m.index + m[0].length);
+        const r = range.getBoundingClientRect();
+        if (r.width === 0 || r.bottom < top) continue;   // off-screen or collapsed
+        out.push({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+      }
+    }
+    return out;
+  }
+
+  // Effects the renderer handles itself rather than handing to the canvas.
+  // Returns true if the caller should stop and let the pause happen.
+  function rendererEffect(name, args) {
+    if (name !== 'dilate' || !activeLine) return false;
+    activeLine.stallUntil = performance.now() + DILATE_MS * (args.scale || 1);
+    return true;
+  }
+
   function applyEvents(events) {
-    for (const ev of events) {
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i];
       if (ev.t === 'text') appendText(ev.value);
-      else if (ev.t === 'effect') { const p = caretPos(target()); effects.fire(ev.name, p.x, p.y, parseArgs(ev.args)); }
+      else if (ev.t === 'effect') {
+        if (RENDERER_EFFECTS.has(ev.name)) {
+          // Everything after the pause has to wait for it. The typewriter
+          // reveals up to 14 characters a frame, so applying the rest of this
+          // chunk now would land the pause most of a word late — and a pause in
+          // the wrong place isn't a quieter version of the effect, it's noise.
+          if (rendererEffect(ev.name, parseArgs(ev.args))) {
+            const rest = events.slice(i + 1);
+            if (rest.length) activeLine.pending = rest;   // [] is truthy; don't hand the loop a no-op frame
+            return;
+          }
+          continue;
+        }
+        const p = caretPos(target());
+        const o = parseArgs(ev.args);
+        if (ev.name === 'apophenia') o.anchors = wordAnchors(14);
+        effects.fire(ev.name, p.x, p.y, o);
+      }
       else if (ev.t === 'style-start') openStyle(ev.name, ev.args);
       else if (ev.t === 'style-end') closeStyle(ev.name);
     }
@@ -362,6 +436,17 @@
     const step = () => {
       if (!activeLine) { typing = false; return; }
       const line = activeLine;
+
+      // dilate: hold everything exactly where it is for a beat. Checked before
+      // the caret is touched, so the caret stays put and keeps blinking — the
+      // effect is a pause, and a frozen caret would read as a crash. Text
+      // arriving meanwhile keeps buffering into line.queue, so nothing is lost;
+      // it just waits.
+      if (line.stallUntil) {
+        if (performance.now() < line.stallUntil) { requestAnimationFrame(step); return; }
+        line.stallUntil = 0;
+      }
+
       if (line.caret && line.caret.parentNode) line.caret.remove();
 
       // Pull every pending text chunk into the reveal buffer up front, stopping
@@ -371,7 +456,12 @@
       // char/frame (~50 chars/s) no matter how fast the model streamed.
       while (line.queue.length && line.queue[0].k === 't') line.reveal += line.queue.shift().s;
 
-      if (line.reveal.length) {
+      if (line.pending) {
+        // What a dilate deferred when it stalled mid-chunk. Ordered ahead of
+        // the reveal buffer: these events came first in the stream.
+        const ev = line.pending; line.pending = null;
+        applyEvents(ev);
+      } else if (line.reveal.length) {
         // Leisurely when caught up, faster the further behind we are.
         const n = Math.min(14, 1 + Math.floor(line.reveal.length / 90));
         // Only ease characters in while they're arriving slowly enough to see

@@ -126,6 +126,7 @@
       this.sheets = [];   // aurora curtains
       this.sweeps = [];   // sonar arcs + beam scanlines
       this.links = null;  // constellation
+      this.webs = null;   // apophenia
       this.frost = null;  // creeping ice
       this.matrix = null;
       this.running = false;
@@ -173,6 +174,7 @@
         case 'glitch': this._glitch(); break;
         case 'aurora': this._aurora(o); break;
         case 'constellation': this._constellation(x, y, o); break;
+        case 'apophenia': this._apophenia(x, y, o); break;
         case 'shatter': this._shatter(x, y, o); break;
         case 'swarm': this._swarm(x, y, o); break;
         case 'sonar': this._sonar(x, y, o); break;
@@ -581,6 +583,62 @@
       this.links = { pts, life: 0, max: 3000, dist: 118 * o.scale, color: _rgb(cols[0]) };
     }
 
+    /*
+     * Constellation's evil twin: the same beautiful linking animation, drawing
+     * lines between things that have nothing to do with each other.
+     *
+     * Every difference from _constellation is the joke:
+     *
+     *  - Constellation links by DISTANCE, which is a real relationship — nearby
+     *    dots belong together, and the picture it assembles is true. Apophenia
+     *    links by nothing at all. Pairs are drawn at random and the length of
+     *    the line is not evidence of anything.
+     *  - Constellation's dots are scattered. Apophenia's land on real WORDS
+     *    (the renderer passes their rects in via o.anchors — the engine still
+     *    never reads the DOM), so it looks like it has found something in the
+     *    text rather than in the void.
+     *  - Constellation fades its links in together. Apophenia draws them one at
+     *    a time, deliberately, like a proof going up on a board.
+     *
+     * Confident, elegant, wrong. Point it at a conclusion about to be reached
+     * badly.
+     */
+    _apophenia(x, y, o) {
+      const cols = o.pal || ['#b98cff', '#7effc4', '#ffffff'];
+      let pts = (o.anchors || []).slice();
+      // No words on screen to hang it off — fall back to inventing some, which
+      // is thematically exactly right.
+      if (pts.length < 3) {
+        pts = [];
+        for (let i = 0; i < 8; i++) {
+          const a = rand(0, TAU), r = Math.sqrt(Math.random()) * 260 * o.scale;
+          pts.push({ x: x + Math.cos(a) * r, y: y + Math.sin(a) * r });
+        }
+      }
+      pts = pts.map((p) => ({ x: p.x, y: p.y, size: rand(1.6, 3.0) * o.scale, color: pick(cols) }));
+
+      // Random pairs, distance ignored on purpose. No pair twice — the effect is
+      // a confident argument, and a confident argument doesn't repeat itself.
+      const want = Math.min(9, Math.max(3, Math.round(pts.length * 0.8)));
+      const seen = new Set();
+      const pairs = [];
+      for (let k = 0; k < want * 6 && pairs.length < want; k++) {
+        const i = (Math.random() * pts.length) | 0;
+        const j = (Math.random() * pts.length) | 0;
+        if (i === j) continue;
+        const key = Math.min(i, j) + ':' + Math.max(i, j);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        pairs.push({ i, j, at: pairs.length * 210 });
+      }
+      this.webs = {
+        pts, pairs, life: 0,
+        max: (pairs.length * 210) + 2600,
+        color: _rgb(cols[0]),
+      };
+      this._ensureRunning();
+    }
+
     // Glass breaking: opaque shards spin outward from a bright crack.
     _shatter(x, y, o) {
       const cols = o.pal || ['#dff3ff', '#8fd8ff', '#b8d8ff', '#ffffff'];
@@ -907,7 +965,8 @@
     // ---- animation loop ----
     _busy() {
       return this.particles.length || this.rings.length || this.bolts.length
-        || this.sheets.length || this.sweeps.length || this.links || this.frost || this.matrix
+        || this.sheets.length || this.sweeps.length || this.links || this.webs
+        || this.frost || this.matrix
         || this.noise || this.grid || this.traces || this.tracers;
     }
 
@@ -1007,6 +1066,13 @@
           p.x += p.vx * f; p.y += p.vy * f;
         }
         if (this.links.life >= this.links.max) this.links = null;
+      }
+
+      // Apophenia's points don't drift: they're pinned to words that are really
+      // there. It's only the lines between them that are invented.
+      if (this.webs) {
+        this.webs.life += dt;
+        if (this.webs.life >= this.webs.max) this.webs = null;
       }
 
       if (this.frost) {
@@ -1254,6 +1320,40 @@
         }
         ctx.globalAlpha = fade;
         for (const p of L.pts) {
+          const sprite = glowSprite(p.color);
+          const d = p.size * 5;
+          ctx.drawImage(sprite, p.x - d / 2, p.y - d / 2, d, d);
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      // Apophenia: the same glowing web, argued rather than observed. Each line
+      // draws itself in over its own 260ms once its turn comes, so the figure
+      // accumulates like someone talking you through it.
+      if (this.webs) {
+        const W = this.webs;
+        const t = W.life / W.max;
+        const fade = t > 0.78 ? 1 - (t - 0.78) / 0.22 : 1;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineWidth = 1.1;
+        for (const pr of W.pairs) {
+          const age = W.life - pr.at;
+          if (age <= 0) continue;
+          const a = W.pts[pr.i], b = W.pts[pr.j];
+          const grow = Math.min(1, age / 260);
+          // Distance is not evidence here, so unlike constellation the alpha
+          // doesn't fall off with length — a line across the whole screen is
+          // asserted exactly as confidently as one between neighbours.
+          ctx.strokeStyle = `rgba(${W.color},${(0.5 * fade).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(a.x + (b.x - a.x) * grow, a.y + (b.y - a.y) * grow);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = fade;
+        for (const p of W.pts) {
           const sprite = glowSprite(p.color);
           const d = p.size * 5;
           ctx.drawImage(sprite, p.x - d / 2, p.y - d / 2, d, d);

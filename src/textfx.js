@@ -1,5 +1,5 @@
 /*
- * textfx.js — the consuming spans: text that destroys itself.
+ * textfx.js — the spans that do something to the text itself, from script.
  *
  * Classic browser script: attaches window.FlourishTextFX.
  *
@@ -8,13 +8,30 @@
  * animate real characters AND throw real particles off them, so the embers
  * peeling off a burning letter come from the same engine as a nova.
  *
+ * The consuming spans — text that destroys itself:
+ *
  *   burn     — a character catches, and fire spreads outward from it. Wind
  *              makes the spread asymmetric: downwind it races, upwind it
  *              creeps. Each character goes ignite → white-hot → charcoal →
  *              ash, shedding embers at its peak and ash as it dies.
  *   cascade  — characters detach and fall away as Matrix glyphs.
  *
- * Two things are load-bearing:
+ * The unreliable spans — text that lies:
+ *
+ *   rot         — characters decay toward lookalikes, in place, slowly. The
+ *                 line stays exactly as long as you leave it and stops being
+ *                 what you wrote.
+ *   confabulate — words quietly turn over behind the reader. Never announces,
+ *                 never flickers; the only evidence is the reader's memory.
+ *   intrusive   — a word that was never said pushes in, sits, and withdraws.
+ *   overwrite   — characters land on top of each other instead of after.
+ *
+ * The difference matters: burn and cascade are honest about being destructive —
+ * you watch them eat the line. The unreliable three are built so you don't
+ * notice, which is why they are the only effects in the app that can cost the
+ * reader something they'd act on, and why MUTABLE_REJECT below is not optional.
+ *
+ * Three things are load-bearing:
  *
  * 1. CONSUMED CHARACTERS KEEP THEIR BOX. The <i> is never removed and never
  *    display:none — it stays in place. Removing it would reflow the paragraph
@@ -31,6 +48,14 @@
  *    typewriter is still appending text below, so a rect read per character per
  *    frame would both stall and lie. Each character's position is read once, at
  *    its own ignition, and reused for its embers and ash.
+ *
+ * 3. NOTHING MUTATES WHAT A READER MIGHT COPY. rot and confabulate change what
+ *    the text SAYS, so a span aimed carelessly could put a command or a path on
+ *    screen that the model never wrote — and neither Jim nor the model would
+ *    find out, because the screen is the only record either of them checks.
+ *    Flourish.mutableMask() decides what is plainly prose, and MUTABLE_REJECT
+ *    below applies it per character. The system prompt asks the model to aim
+ *    these well; the mask is what makes aiming badly harmless.
  */
 (function () {
   'use strict';
@@ -108,6 +133,31 @@
       if (!chars.length) return;
       if (name === 'burn') this._burn(span, chars, args);
       else if (name === 'cascade') this._cascade(span, chars, args);
+      else if (name === 'rot') this._rot(span, chars, args);
+      else if (name === 'confabulate') this._confabulate(span, chars, args);
+      else if (name === 'intrusive') this._intrusive(span, chars, args);
+      else if (name === 'overwrite') this._overwrite(span, chars, args);
+    }
+
+    /**
+     * The characters of `chars` that a mutating span may rewrite.
+     * Returns a Set of indices.
+     *
+     * The mask is computed from the span's own text rather than from the DOM,
+     * because the renderer switches the auto-highlight layer off inside an
+     * explicit fx span (see appendText in renderer.js) — so there are no
+     * .auto-code nodes in here to key off, and the shape of the text is all
+     * there is to go on.
+     */
+    _mutable(chars) {
+      const text = chars.map((c) => c.textContent).join('');
+      const mask = window.Flourish.mutableMask(text);
+      const out = new Set();
+      // One <i> per character, so the mask indexes the chars array directly —
+      // but only while that holds. Bail rather than guess if it ever doesn't.
+      if (mask.length !== chars.length) return out;
+      for (let i = 0; i < mask.length; i++) if (mask[i]) out.add(i);
+      return out;
     }
 
     _burn(span, chars, args) {
@@ -231,6 +281,172 @@
       };
       this.running.add(span);
       requestAnimationFrame(step);
+    }
+
+    // ---- the unreliable spans ----
+
+    /*
+     * rot — characters decaying toward lookalikes, slowly, in place.
+     *
+     * Scheduled with setTimeout rather than rAF, and that's the whole design:
+     * this effect is measured in tens of seconds and touches a character maybe
+     * four times in its life. A rAF loop would wake 60 times a second for
+     * ~30 seconds to do nothing, per span, forever — text has a shelf life here,
+     * so the spans don't end, they just run out of steps.
+     */
+    _rot(span, chars, args) {
+      const F = window.Flourish;
+      const mutable = this._mutable(chars);
+      const rest = restColor();
+      // Slower with `slow`, quicker with `fast` — the default is tuned so a
+      // paragraph looks untouched while you read it and wrong when you come back.
+      const a = String(args || '').toLowerCase();
+      const scale = a.includes('fast') ? 0.35 : (a.includes('slow') ? 2.4 : 1);
+      const FIRST = 4200 * scale;   // nothing moves while the reader is still on the line
+      const STEP = 3400 * scale;
+
+      for (let i = 0; i < chars.length; i++) {
+        if (!mutable.has(i)) continue;
+        const c = chars[i];
+        let left = F.rotDepth(c.textContent);
+        if (!left) continue;
+        const tick = () => {
+          const next = F.rotNext(c.textContent);
+          if (next === c.textContent) return;       // spent
+          c.textContent = next;
+          // Each step dims a little toward ash. Colour only, never opacity: a
+          // rotted character is exactly as legible as the glyph it rotted into.
+          const k = 1 - left / (left + 1);
+          c.style.color = hex(mix(parseHex('#cfe9d8'), rest, Math.min(1, k + 0.25)));
+          if (--left > 0) setTimeout(tick, STEP + rand(-700, 700) * scale);
+        };
+        setTimeout(tick, FIRST + rand(0, 2600) * scale);
+      }
+    }
+
+    /*
+     * confabulate — words that turn over behind the reader.
+     *
+     * The word keeps its box. A six-letter word becoming a five-letter one would
+     * otherwise reflow the line, and a paragraph that twitches gives the whole
+     * thing away — the same constraint burn has, for the same reason (see 1
+     * above). So the replacement is measured against the original's width and
+     * scaled into it: layout never learns anything happened.
+     *
+     * Widths are read in one pass up front. They stay true no matter when each
+     * swap actually fires, precisely because every swap preserves width.
+     */
+    _confabulate(span, chars, args) {
+      const F = window.Flourish;
+      const text = chars.map((c) => c.textContent).join('');
+      const mask = F.mutableMask(text);
+      if (mask.length !== chars.length) return;
+
+      const plan = F.planConfab(text).filter((p) => {
+        for (let i = p.start; i < p.end; i++) if (!mask[i]) return false;
+        return true;
+      });
+      if (!plan.length) return;
+
+      // Two or three per span. All of them at once reads as a glitch; one is
+      // easy to talk yourself out of having seen.
+      const picks = [];
+      const pool = plan.slice();
+      const want = Math.min(pool.length, 2 + ((Math.random() * 2) | 0));
+      while (picks.length < want && pool.length) {
+        picks.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
+      }
+
+      // One layout pass for every word we're going to touch.
+      for (const p of picks) {
+        const a = chars[p.start].getBoundingClientRect();
+        const b = chars[p.end - 1].getBoundingClientRect();
+        p.w = b.right - a.left;
+      }
+
+      for (const p of picks) {
+        const delay = 2600 + Math.random() * 9000;
+        setTimeout(() => {
+          if (!chars[p.start].parentNode) return;   // line was cleared underneath us
+          const box = document.createElement('b');
+          box.style.width = p.w.toFixed(2) + 'px';
+          const inner = document.createElement('span');
+          inner.textContent = p.to;
+          box.appendChild(inner);
+          chars[p.start].parentNode.insertBefore(box, chars[p.start]);
+          for (let i = p.start; i < p.end; i++) chars[i].remove();
+          // Scale the replacement into the width the original left behind. Read
+          // after insertion because the natural width isn't knowable before it.
+          const natural = inner.getBoundingClientRect().width;
+          if (natural > 0) {
+            inner.style.transform = 'scaleX(' + (p.w / natural).toFixed(4) + ')';
+          }
+        }, delay);
+      }
+    }
+
+    /*
+     * intrusive — a word that was never said.
+     *
+     * The only effect in the file that WANTS the reflow: the sentence opens to
+     * let the word in and closes behind it, and that movement is the effect.
+     * The word rides in the directive's own args.
+     */
+    _intrusive(span, chars, args) {
+      const word = String(args || '').trim();
+      if (!word) return;
+
+      // Land it on a space, so it reads as a word pushing between two words
+      // rather than splitting one open.
+      const gaps = [];
+      for (let i = 1; i < chars.length - 1; i++) {
+        if (chars[i].textContent === ' ') gaps.push(i);
+      }
+      if (!gaps.length) return;
+      const at = gaps[(Math.random() * gaps.length) | 0];
+
+      const el = document.createElement('span');
+      el.className = 'intruder';
+      el.textContent = word + ' ';
+      chars[at].parentNode.insertBefore(el, chars[at + 1]);
+
+      // width:0 + overflow:hidden means scrollWidth is the width it WOULD have.
+      const w = el.scrollWidth;
+      const open = [{ width: '0px', opacity: 0 }, { width: w + 'px', opacity: 1 }];
+      const shut = [{ width: w + 'px', opacity: 1 }, { width: '0px', opacity: 0 }];
+      const ease = { duration: 420, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)', fill: 'forwards' };
+
+      el.animate(open, ease);
+      setTimeout(() => {
+        const a = el.animate(shut, ease);
+        a.onfinish = () => el.remove();   // the text closes over the gap
+      }, 1500 + Math.random() * 1200);
+    }
+
+    /*
+     * overwrite — characters landing on top of each other.
+     *
+     * margin-left, not translateX: the point is that the line gets DENSER, and a
+     * transform would slide the glyphs together while leaving the line its
+     * original width — a word pile with a gap after it, which reads as a layout
+     * bug. Margins actually shorten the line. It reflows every frame of the
+     * transition, which is affordable exactly once, on a span this short.
+     */
+    _overwrite(span, chars, args) {
+      const F = window.Flourish;
+      const a = String(args || '').toLowerCase();
+      const max = a.includes('hard') ? 0.82 : (a.includes('soft') ? 0.38 : null);
+      const n = chars.length;
+      for (let i = 0; i < n; i++) {
+        chars[i].style.transition = 'margin-left 1.1s cubic-bezier(0.4, 0, 0.2, 1)';
+        chars[i].style.transitionDelay = (i * 0.012).toFixed(3) + 's';
+      }
+      // Next frame, so the transition has a start value to leave from.
+      requestAnimationFrame(() => {
+        for (let i = 0; i < n; i++) {
+          chars[i].style.marginLeft = '-' + F.overwriteShift(i, n, max).toFixed(3) + 'ch';
+        }
+      });
     }
   }
 

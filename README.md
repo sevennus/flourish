@@ -101,6 +101,8 @@ and must be closed; **consuming spans** destroy the text they wrap.
 | `{{fx:grid}}` | synthwave, going somewhere |
 | `{{fx:circuit}}` | wiring, how it's connected |
 | `{{fx:tracer}}` | paths, routing, following a thread |
+| `{{fx:apophenia}}` | a conclusion reached badly — confident, wrong |
+| `{{fx:dilate}}` | *paints nothing* — the terminal holds still a beat |
 
 | Text span | Reads as |
 |---|---|
@@ -121,6 +123,12 @@ and must be closed; **consuming spans** destroy the text they wrap.
 | `{{fx:hexdump}}…{{/fx:hexdump}}` | raw bytes, low-level, machine |
 | `{{fx:hologram}}…{{/fx:hologram}}` | virtual, projected, not real |
 | `{{fx:redact}}…{{/fx:redact}}` | a bar slides away — a reveal |
+| `{{fx:twin}}…{{/fx:twin}}` | two copies, drifting out of sync |
+| `{{fx:overwrite}}…{{/fx:overwrite}}` | a buffer with two writers |
+| `{{fx:palimpsest old text}}…{{/fx:palimpsest}}` | what it said before, underneath |
+| `{{fx:rot}}…{{/fx:rot}}` | **lies** — decays toward lookalikes |
+| `{{fx:confabulate}}…{{/fx:confabulate}}` | **lies** — words turn over behind you |
+| `{{fx:intrusive a word}}…{{/fx:intrusive}}` | **lies** — a word that was never said |
 | `{{fx:color #ff0066}}…{{/fx:color}}` | any specific colour |
 
 ### Consuming spans
@@ -147,6 +155,43 @@ characters *and* throws real particles off them — embers from the flame front,
 ash from consumed characters, falling glyphs for `cascade` — all from the same
 engine that draws a nova.
 
+### Unreliable spans
+
+`{{fx:rot}}`, `{{fx:confabulate}}` and `{{fx:intrusive}}` **change what the text
+says** after the reader has read it. Everything else in the vocabulary is
+honest — a glowing command is still the command, and even `corrupt` and `glitch`
+announce their own unreliability so loudly that the reader knows to discount
+them. A thing that says *"I am broken"* is trustworthy. These three don't say
+anything.
+
+That's the register they exist for: a record that changed behind you, a memory
+that doesn't match, a machine being unreliable about itself. They are not
+emphasis and not decoration.
+
+They're also the only place in the app where **the screen stops being evidence
+of what the model said** — which matters more here than it would in a toy,
+because Flourish renders real working output. So the aiming rule is not left to
+the prompt. `Flourish.mutableMask()` decides, per character, what is plainly
+English prose; `textfx.js` refuses to touch anything else. Paths, commands,
+numbers, flags, backticked code — and, because `rm` and `git` are perfectly good
+words until you see the `-rf` next to them, **the words around them too**:
+contamination spreads from a hard token until the end of the sentence. Bare
+numbers freeze themselves without spreading, or one year would freeze every
+paragraph containing it.
+
+A careless span therefore degrades to *doing nothing* rather than to lying about
+a command. `npm test` asserts both that the mask is right and that textfx
+actually calls it — a wiring mistake there is invisible on screen, because a
+guard that never fires looks exactly like a guard that passed. `npm run fx-shots`
+proves it against real pixels: it rots `git reset --hard origin/main` for nine
+seconds and fails if a single byte moved.
+
+`{{fx:dilate}}` belongs to the same family and paints nothing at all — it stalls
+the typewriter for a beat and carries on. It's the one point effect with no
+engine case, because the renderer intercepts it (`RENDERER_EFFECTS`); in a
+terminal that never stops painting, stopping is the only thing left that can
+unsettle anyone.
+
 Point effects take an optional **palette** (`mint` `ice` `gold` `ember` `violet`
 `rose` `mono`) and **size** (`sm` `md` `lg` `xl`), in either order —
 `{{fx:spark gold}}`, `{{fx:nova sm}}`, `{{fx:swarm violet lg}}`. An unknown word
@@ -163,9 +208,17 @@ the model never writes it).
 The parser is pure and streaming-safe (it handles a directive split across two
 network chunks), so it's unit-tested without a browser.
 
-`wave`, `bounce`, `scramble`, `stamp`, `corrupt`, `sparkle`, `hexdump`, `burn`
-and `cascade` render one `<i>` per character (`PER_CHAR_SPANS`) so they can
-stagger or be driven individually; everything else is a single styled span.
+`wave`, `bounce`, `scramble`, `stamp`, `corrupt`, `sparkle`, `hexdump`, `twin`,
+`overwrite`, `rot`, `confabulate`, `intrusive`, `burn` and `cascade` render one
+`<i>` per character (`PER_CHAR_SPANS`) so they can stagger or be driven
+individually; everything else is a single styled span.
+
+`burn`, `cascade`, `rot`, `confabulate`, `intrusive` and `overwrite`
+(`SCRIPTED_SPANS`) are driven from `textfx.js` when their **closing** directive
+arrives, not as characters stream in — they all need the span to be complete.
+Fire can't spread through a word that's still being typed, a word can't be
+swapped before it exists, and `overwrite` can't ramp a pull-back across *n*
+characters until it knows what *n* is.
 
 ### Variety is mostly free
 
@@ -482,8 +535,11 @@ src/bridge.js    pure: ssh2 connect config + buildArgs() — the claude invocati
 src/ccstream.js  pure: Claude Code stream-json → app events (+ line buffer).
 src/flourish.js  pure: streaming flourish-directive parser + arg grammar (UMD).
 src/autofx.js    pure: streaming auto-highlighter for code/bold/numbers (UMD).
-src/textfx.js    the consuming spans (burn/cascade) — the one place the DOM text
-                 layer and the canvas particle layer meet.
+src/textfx.js    the scripted spans. The consuming ones (burn/cascade) are the
+                 one place the DOM text layer and the canvas particle layer
+                 meet; the unreliable ones (rot/confabulate/intrusive) are the
+                 one place the text stops being what the model said, and the
+                 one place a guard decides what may move.
 src/prompt.js    the flourish protocol appended to Claude Code's system prompt.
 src/effects.js   canvas particle engine + full-screen effects.
 src/inputfx.js   prompt-box typing sparks + the heat model.

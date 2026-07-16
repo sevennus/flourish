@@ -31,7 +31,10 @@ const POINT = [
   ['shake', 140],
   // Slower ones need longer to become themselves: frost has to creep, the
   // constellation has to find its links, aurora has to fade up.
-  ['aurora', 1500], ['constellation', 900], ['shatter', 420], ['swarm', 1100],
+  // apophenia draws its lines one at a time (210ms apart, up to 9), so it needs
+  // long enough to have made most of its argument.
+  ['aurora', 1500], ['constellation', 900], ['apophenia', 1900],
+  ['shatter', 420], ['swarm', 1100],
   ['sonar', 700], ['warp', 480], ['frost', 1500], ['bloom', 1000],
   ['rain', 900], ['beam', 700], ['implode', 620],
   ['scanlines', 900], ['static', 300], ['vhs', 200], ['grid', 1200],
@@ -76,6 +79,12 @@ const SHEET = [
   ['color', 'any specific colour'],
   ['burn', 'CONSUMES — spreads on the wind'],
   ['cascade', 'CONSUMES — falls away as glyphs'],
+  ['twin', 'two copies, drifting apart'],
+  ['overwrite', 'a buffer with two writers'],
+  ['palimpsest', 'what it said before, underneath'],
+  ['rot', 'LIES — decays toward lookalikes'],
+  ['confabulate', 'LIES — words turn over behind you'],
+  ['intrusive', 'LIES — a word that was never said'],
 ];
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -122,7 +131,7 @@ async function run() {
       const fx = window.__fx;
       fx.particles = []; fx.rings = []; fx.bolts = [];
       fx.sheets = []; fx.sweeps = [];
-      fx.links = null; fx.frost = null; fx.matrix = null;
+      fx.links = null; fx.webs = null; fx.frost = null; fx.matrix = null;
       fx.noise = null; fx.grid = null; fx.traces = null; fx.tracers = null;
       // The DOM-driven ones latch a class rather than living in an array.
       const app = document.getElementById('app');
@@ -182,6 +191,9 @@ async function run() {
         if (!fx) { tgt.appendChild(document.createTextNode(ev.value)); continue; }
         for (const ch of ev.value) {
           const i = document.createElement('i'); i.textContent = ch;
+          // twin's ghost is content:attr(data-c) — without this it renders the
+          // empty string and the span looks like plain text. See renderer.js.
+          i.dataset.c = ch;
           if (fx !== 'scramble') i.style.animationDelay = ((waveN++ % 24) * 0.05).toFixed(2) + 's';
           tgt.appendChild(i);
         }
@@ -206,7 +218,9 @@ async function run() {
       const span = document.createElement('span');
       span.dataset.fx = '${fx}'; span.className = 'fx-${fx}';
       for (const ch of ${JSON.stringify(text)}) {
-        const i = document.createElement('i'); i.textContent = ch; span.appendChild(i);
+        const i = document.createElement('i'); i.textContent = ch;
+        i.dataset.c = ch;   // twin's ghost reads this; see renderer.js
+        span.appendChild(i);
       }
       body.appendChild(span); line.appendChild(body); t.appendChild(line);
       window.__tfx = window.__tfx || new window.FlourishTextFX(window.__fx);
@@ -242,6 +256,89 @@ async function run() {
   await layout('cascade', 'scrolling out of existence', 'right');
   await wait(620);
   await shoot(win, 'cascade');
+
+  // ---- the unreliable spans ----
+  //
+  // A single frame proves even less here than it does for burn: the whole point
+  // of rot and confabulate is that nothing appears to happen and then the text
+  // is different. So these capture the text ITSELF at intervals, and fail loudly
+  // if it didn't change — a broken rot looks exactly like a working rot until
+  // you compare two moments.
+
+  const textOf = (sel) => win.webContents.executeJavaScript(
+    `(document.querySelector('${sel}') || {}).innerText || ''`);
+
+  console.log('rot (a sequence — the line should decay in place):');
+  await reset();
+  await layout('rot', 'this line will not survive being read twice', 'fast');
+  const rotBefore = await textOf('.fx-rot');
+  await shoot(win, 'rot-1-fresh');
+  await wait(3000);
+  await shoot(win, 'rot-2-going');
+  await wait(5000);
+  await shoot(win, 'rot-3-spent');
+  const rotAfter = await textOf('.fx-rot');
+  console.log('    before:', JSON.stringify(rotBefore));
+  console.log('    after :', JSON.stringify(rotAfter));
+  if (rotBefore === rotAfter) console.log('  ! rot changed NOTHING — the effect is dead');
+  if (rotBefore.length !== rotAfter.length) console.log('  ! rot changed the LENGTH — the line will have reflowed');
+
+  console.log('confabulate (the words should turn over on their own):');
+  await reset();
+  await layout('confabulate', 'you will always remember that this is true', '');
+  const confabBefore = await textOf('.fx-confabulate');
+  await shoot(win, 'confabulate-1-before');
+  await wait(12000);
+  const confabAfter = await textOf('.fx-confabulate');
+  await shoot(win, 'confabulate-2-after');
+  console.log('    before:', JSON.stringify(confabBefore));
+  console.log('    after :', JSON.stringify(confabAfter));
+  if (confabBefore === confabAfter) console.log('  ! confabulate changed NOTHING — the effect is dead');
+
+  // The guard, in the real renderer rather than in a unit test. mutableMask()
+  // being right is worth nothing if textfx doesn't consult it, and this is the
+  // only check that watches the actual pixels refuse.
+  console.log('the guard (a command inside a rot span must not move):');
+  await reset();
+  const CMD = 'git reset --hard origin/main';
+  await layout('rot', CMD, 'fast');
+  await wait(9000);
+  const guarded = await textOf('.fx-rot');
+  await shoot(win, 'rot-guarded-command');
+  console.log('    command:', JSON.stringify(guarded));
+  if (guarded !== CMD) console.log(`  ! THE GUARD LEAKED — rot rewrote a command: ${JSON.stringify(guarded)}`);
+  else console.log('  ✓ the command is byte-identical after rot ran over it');
+
+  console.log('twin / overwrite / palimpsest:');
+  for (const [fx, text, args] of [
+    ['twin', 'two copies drifting apart', ''],
+    ['overwrite', 'a buffer with two writers', ''],
+  ]) {
+    await reset();
+    await layout(fx, text, args);
+    await wait(1600);
+    await shoot(win, fx);
+  }
+
+  // palimpsest is the one span with no <i> children — it's a whole-span ghost
+  // reading its old text out of data-fx-args — so layout() doesn't fit it.
+  await reset();
+  await win.webContents.executeJavaScript(`
+    (function () {
+      const t = document.getElementById('transcript');
+      t.innerHTML = '';
+      const line = document.createElement('div');
+      line.className = 'line assistant'; line.style.fontSize = '34px'; line.style.marginTop = '60px';
+      const body = document.createElement('div'); body.className = 'body';
+      const span = document.createElement('span');
+      span.dataset.fx = 'palimpsest'; span.className = 'fx-palimpsest';
+      span.dataset.fxArgs = 'what the line said before someone edited it';
+      span.textContent = 'what it says now';
+      body.appendChild(span); line.appendChild(body); t.appendChild(line);
+      return true;
+    })();`);
+  await wait(2200);
+  await shoot(win, 'palimpsest');
   await wait(400);
   await reset();
   await win.webContents.executeJavaScript(`document.getElementById('transcript').innerHTML = ''; true;`);
@@ -266,6 +363,9 @@ async function run() {
         const s = document.createElement('span');
         s.dataset.fx = name;
         if (name === 'color') s.style.color = '#ff5cad'; else s.className = 'fx-' + name;
+        // palimpsest's ghost is content:attr(data-fx-args). With no args its row
+        // renders as plain text — i.e. as the one thing it isn't.
+        if (name === 'palimpsest') s.dataset.fxArgs = 'an earlier draft of this';
         s.style.cssText += ';font-size:23px;min-width:148px;';
         const label = name === 'color' ? 'color #ff5cad' : name;
         if (PC.has(name)) {
@@ -273,7 +373,10 @@ async function run() {
           for (const ch of label) {
             const i = document.createElement('i');
             i.textContent = ch;
-            if (name !== 'burn' && name !== 'cascade' && name !== 'scramble' && name !== 'hexdump') {
+            i.dataset.c = ch;   // twin's ghost reads this; see renderer.js
+            // The scripted spans are driven from textfx below; a CSS stagger
+            // here would fight them.
+            if (!window.Flourish.SCRIPTED_SPANS.has(name) && name !== 'scramble' && name !== 'hexdump') {
               i.style.animationDelay = ((n++ % 24) * 0.05).toFixed(2) + 's';
             }
             s.appendChild(i);
@@ -302,6 +405,17 @@ async function run() {
       window.__tfx.play('${n}', window.__sheetSpans.${n}, ${JSON.stringify(args)});
       return true;
     })();`);
+  // overwrite is scripted too, and its whole effect is the margins textfx sets —
+  // left unplayed its row is indistinguishable from plain text. Fired first
+  // because its pull-back is a 1.1s transition and the sheet is shot in ~1.2s.
+  //
+  // rot, confabulate and intrusive are deliberately NOT played here: rot would
+  // eat its own label before the shutter, and the other two are no-ops on a
+  // one-word label (nothing in "confabulate" is in the drift table; "intrusive"
+  // has no space to push into). Their rows show the name in its own styling,
+  // which is what the sheet is for. The sequences above are where they're proved.
+  await play('overwrite', 'hard');
+  await wait(700);
   await play('burn', 'right breeze');
   await wait(300);
   await play('cascade', 'right');

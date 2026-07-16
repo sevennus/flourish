@@ -171,8 +171,15 @@ async function main() {
     'the whole reply lands, first word to last');
 
   // Spot-check text from each paragraph, so a stall in the middle can't hide.
+  //
+  // Every phrase here has to sit OUTSIDE a rot/confabulate span. Those spans
+  // rewrite their own characters seconds after landing, so a phrase checked
+  // from inside one would pass or fail on timing — and a flaky assertion is
+  // worse than no assertion, which is the lesson this whole file exists to
+  // remember.
   for (const phrase of ['a terminal that paints as it speaks', 'The quiet ones',
-    'The working ones', 'The moods', 'The loud ones', 'a nova']) {
+    'The working ones', 'The moods', 'The loud ones', 'a nova',
+    'The unreliable ones', 'Then it just stops for a beat']) {
     check(text.includes(phrase), `renders: "${phrase}"`);
   }
 

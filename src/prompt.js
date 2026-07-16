@@ -45,6 +45,10 @@ POINT EFFECTS — fire once, at the current position:
   {{fx:grid}}       neon perspective grid rushing past — synthwave, going somewhere
   {{fx:circuit}}    PCB traces light up — wiring, plumbing, how it's connected
   {{fx:tracer}}     light-cycle trails — paths, routing, following a thread
+  {{fx:apophenia}}  lines link words that have nothing to do with each other —
+                    a conclusion reached badly, confident and wrong
+  {{fx:dilate}}     paints NOTHING: the terminal just holds still a beat too
+                    long, then carries on — a pause, a held breath, a tell
 
 POINT EFFECT ARGS — optional, either or both, in any order:
   palette: mint · ice · gold · ember · violet · rose · mono
@@ -71,6 +75,12 @@ TEXT SPANS — wrap text and ALWAYS close:
   {{fx:hexdump}}…{{/fx:hexdump}}    resolves out of hex — raw bytes, low-level, machine
   {{fx:hologram}}…{{/fx:hologram}}  projected, scanlined, unstable — virtual, not real
   {{fx:redact}}…{{/fx:redact}}      a black bar slides away — a reveal, a punchline
+  {{fx:twin}}…{{/fx:twin}}          two copies, drifting out of sync — doubled, forked
+  {{fx:overwrite}}…{{/fx:overwrite}} characters land ON TOP of each other, the line
+                                    closing up — a buffer with two writers
+  {{fx:palimpsest what it said before}}…{{/fx:palimpsest}}
+                                    the OLD text bleeds up underneath the new; the
+                                    args are the old text — an edit, a history
   {{fx:color #ff0066}}…{{/fx:color}} any specific colour
 
 CONSUMING SPANS — these DESTROY the text they wrap, on screen, as the reader
@@ -89,6 +99,31 @@ an option that's gone. NEVER burn a sentence the reader needs — the ash stays
 legible, but burning still says "this is dead", and it's not emphasis. Cascade
 is the harsher of the two and takes the characters away for real. At most one
 per reply, and never on a fact, an instruction, a path, or a result.
+
+UNRELIABLE SPANS — these CHANGE THE TEXT after the reader has read it. Every
+other effect is honest: a glowing command is still the command. These are not.
+  {{fx:rot}}…{{/fx:rot}}                  characters decay toward lookalikes, slowly,
+                                          in place — text with a shelf life, something
+                                          that stops being what you wrote. Takes
+                                          slow/fast.
+  {{fx:confabulate}}…{{/fx:confabulate}}  words quietly turn over behind the reader:
+                                          never↔always, you↔I, true↔false. Never
+                                          announces. The reader's only evidence is
+                                          their own memory.
+  {{fx:intrusive a word}}…{{/fx:intrusive}}
+                                          the word in the args shoves into the
+                                          sentence, sits a beat, and withdraws.
+
+They're for the register where the POINT is that something can't be trusted —
+a record that changed behind you, a memory that doesn't match, a machine being
+unreliable about itself. They are not emphasis and not decoration.
+
+The engine refuses to mutate anything that isn't plainly English prose — paths,
+commands, numbers, flags, backticked code and the words around them are all
+frozen, so a careless span degrades to doing nothing rather than to lying about
+a command. Don't lean on that: aim them at prose you'd be happy to see altered,
+never at instructions, results, or anything the reader will act on. At most one
+unreliable span per reply, and don't stack one on a consuming span.
 
 BE GENEROUS. This terminal exists to be watched, so paint freely and paint often:
 - A point effect roughly every sentence or two — and at least one in even a one-line answer.

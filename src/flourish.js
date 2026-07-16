@@ -52,12 +52,21 @@
     'aurora', 'constellation', 'shatter', 'swarm', 'sonar', 'warp',
     'frost', 'bloom', 'rain', 'beam', 'implode',
     'scanlines', 'static', 'vhs', 'grid', 'circuit', 'tracer',
+    'apophenia', 'dilate',
   ]);
+
+  // dilate paints nothing. It's here because it fires like a point effect and
+  // the model names it like one, but the renderer intercepts it before the
+  // engine ever sees it: the whole effect is the typewriter holding still for a
+  // beat, and in a terminal that never stops painting, stopping is the only
+  // thing left that can unsettle anyone. See DILATE_MS in renderer.js.
+  const RENDERER_EFFECTS = new Set(['dilate']);
   const STYLE_SPANS = new Set([
     'shimmer', 'rainbow', 'glow', 'wave', 'color',
     'fire', 'neon', 'scramble', 'bounce',
     'flicker', 'redact', 'stamp', 'chrome', 'ghost', 'corrupt', 'sparkle',
     'burn', 'cascade', 'hologram', 'hexdump',
+    'twin', 'overwrite', 'palimpsest', 'rot', 'confabulate', 'intrusive',
   ]);
 
   // Spans rendered one <i> per character (staggered animation or per-char JS)
@@ -66,6 +75,30 @@
   const PER_CHAR_SPANS = new Set([
     'wave', 'bounce', 'scramble', 'stamp', 'corrupt', 'sparkle',
     'burn', 'cascade', 'hexdump',
+    'twin', 'overwrite', 'rot', 'confabulate', 'intrusive',
+  ]);
+
+  // Spans that CHANGE THE TEXT after it has landed, rather than styling it.
+  // They're the unreliable register: rot degrades characters in place,
+  // confabulate rewrites words behind the reader, intrusive pushes a word in
+  // that was never said. Driven from textfx.js once the span closes, like the
+  // consuming spans, and for the same reason — a word can't be rewritten until
+  // it has finished being typed.
+  //
+  // Everything else in the vocabulary is safe to point at anything: a glowing
+  // command is still the command. These are not, so they carry a hard
+  // restriction that lives in textfx.js rather than in the system prompt —
+  // see MUTABLE_REJECT there. The prompt can only ask the model to aim them
+  // well; the guard is what makes aiming badly harmless.
+  const MUTATING_SPANS = new Set(['rot', 'confabulate', 'intrusive']);
+
+  // Spans driven from script (textfx.js) once the closing directive arrives,
+  // rather than as characters stream in. They all share one reason: they need
+  // the span to be COMPLETE. Fire can't spread through a word that's still being
+  // typed, a word can't be swapped before it exists, and overwrite can't ramp a
+  // pull-back across `n` characters until it knows what `n` is.
+  const SCRIPTED_SPANS = new Set([
+    'burn', 'cascade', 'rot', 'confabulate', 'intrusive', 'overwrite',
   ]);
 
   // Spans that DESTROY the text they wrap — the characters are gone when the
@@ -148,6 +181,271 @@
     for (let i = from + 1; i < count; i++) at[i] = at[i - 1] + (w.dir > 0 ? downwind : upwind);
     for (let i = from - 1; i >= 0; i--) at[i] = at[i + 1] + (w.dir > 0 ? upwind : downwind);
     return at;
+  }
+
+  // ---- rot: characters decaying toward lookalikes ----
+
+  // Each character's decay path, one step at a time, ending at a full stop.
+  // The chains are built on SHAPE, not on meaning: every step has to be a glyph
+  // the reader could plausibly have misread the previous one as, or the effect
+  // reads as corruption (which `corrupt` already does, loudly) rather than as
+  // text going soft while you weren't looking.
+  //
+  // Everything converges on '.' rather than on ' '. A rotted line has to keep
+  // its shape — holes would reflow the paragraph, and a period is the smallest
+  // mark that still holds a character's box.
+  //
+  // Every chain has to terminate, and the digits are where that's easy to get
+  // wrong: shape-wise `b`→`6` and `6`→`b` are both honest, but together they're
+  // a cycle, and a cycle here is a character that never stops changing inside a
+  // rAF loop. The letters step toward the digits; the digits only ever step
+  // toward round shapes or straight to a stop. rotTerminates() proves it.
+  const ROT_CHAINS = {
+    a: 'oc.', b: '6o.', c: 'r.', d: 'cl.', e: 'cr.', f: 'r.', g: '9o.',
+    h: 'nr.', i: 'l.', j: 'i.', k: 'x.', l: '|.', m: 'nr.', n: 'r.',
+    o: 'c.', p: 'o.', q: 'g.', r: '.', s: '5.', t: 'fr.', u: 'v.',
+    v: '.', w: 'v.', x: '.', y: 'v.', z: '2.',
+    A: '4.', B: '8.', C: 'c.', D: 'O.', E: 'F.', F: 'r.', G: '6.',
+    H: 'n.', I: 'l.', J: 'i.', K: 'x.', L: '|.', M: 'nn.', N: 'n.',
+    O: '0.', P: 'F.', Q: 'O.', R: 'F.', S: '5.', T: 'r.', U: 'v.',
+    V: 'v.', W: 'v.', X: 'x.', Y: 'v.', Z: '2.',
+    '0': 'o.', '1': '|.', '2': '.', '3': '>.', '4': 'l.', '5': '.',
+    '6': 'o.', '7': '/.', '8': 'o.', '9': 'o.',
+  };
+
+  /**
+   * One step of decay. Returns the next glyph along `ch`'s chain, or the same
+   * character if it has nowhere left to go ('.' and whitespace are terminal).
+   *
+   * Pure and total: an unmapped character (punctuation, emoji, anything
+   * non-Latin) is its own terminal state rather than an error, so rot applied to
+   * a line of CJK or a shrug emoticon quietly does nothing instead of throwing
+   * inside a rAF loop.
+   */
+  function rotNext(ch) {
+    const chain = ROT_CHAINS[ch];
+    if (chain) return chain[0];
+    // Mid-chain: find the character in the chain it belongs to and step along.
+    for (const k in ROT_CHAINS) {
+      const c = ROT_CHAINS[k];
+      const at = c.indexOf(ch);
+      if (at !== -1 && at < c.length - 1) return c[at + 1];
+    }
+    return ch;
+  }
+
+  // No chain is anywhere near this long; it's a backstop so a future edit that
+  // reintroduces a cycle degrades to a bounded walk instead of hanging.
+  const ROT_MAX_DEPTH = 12;
+
+  /**
+   * How many steps `ch` has left before it bottoms out. Used to size the
+   * effect's lifetime so it stops scheduling frames once everything is spent.
+   */
+  function rotDepth(ch) {
+    let n = 0;
+    let c = ch;
+    for (let i = 0; i < ROT_MAX_DEPTH; i++) {
+      const nx = rotNext(c);
+      if (nx === c) break;
+      c = nx; n++;
+    }
+    return n;
+  }
+
+  /**
+   * Does `ch` reach a terminal glyph without revisiting one? False means the
+   * chains contain a cycle, which the test asserts against for every character
+   * in the table — the failure mode is a rAF loop that never settles, and it's
+   * invisible until someone rots the one word that contains the bad letter.
+   */
+  function rotTerminates(ch) {
+    const seen = new Set();
+    let c = ch;
+    for (let i = 0; i < ROT_MAX_DEPTH; i++) {
+      if (seen.has(c)) return false;
+      seen.add(c);
+      const nx = rotNext(c);
+      if (nx === c) return true;
+      c = nx;
+    }
+    return false;
+  }
+
+  // ---- confabulate: words that change behind you ----
+
+  // Substitutions that leave the sentence perfectly grammatical and quietly
+  // reverse it. Negations and pronouns only: a swap the reader's eye slides over
+  // is the whole effect, and anything that needs a thesaurus would need the
+  // engine to understand the sentence.
+  //
+  // Deliberately symmetric — the table is walked in both directions — so the
+  // reader who looks twice finds it changed back.
+  const CONFAB_PAIRS = [
+    ['always', 'never'], ['all', 'none'], ['can', 'cannot'], ['is', 'is not'],
+    ['will', 'will not'], ['did', 'did not'], ['does', 'does not'],
+    ['yes', 'no'], ['safe', 'unsafe'], ['every', 'no'],
+    ['your', 'my'], ['you', 'I'], ['yours', 'mine'], ['yourself', 'myself'],
+    ['remember', 'forget'], ['remembered', 'forgot'],
+    ['here', 'there'], ['now', 'then'], ['first', 'last'],
+    ['before', 'after'], ['more', 'less'], ['true', 'false'],
+  ];
+
+  // Keyed lowercase because lookups are; the VALUES keep their own natural
+  // casing, which is what carries "I" through as a capital.
+  const CONFAB_MAP = (() => {
+    const m = new Map();
+    for (const [a, b] of CONFAB_PAIRS) { m.set(a.toLowerCase(), b); m.set(b.toLowerCase(), a); }
+    return m;
+  })();
+
+  // Words that are capitalised wherever they stand. A leading capital normally
+  // means "start of a sentence", and the replacement should inherit it — but
+  // "I" is capital in the middle of a sentence too, so inheriting from it turns
+  // "and I remember" into "and You forget". English has exactly one of these.
+  const ALWAYS_CAPITAL = new Set(['i']);
+
+  /**
+   * Find the words in `text` that confabulate could turn over.
+   * Returns [{ start, end, from, to }] in document order — offsets into `text`,
+   * so the caller can map them onto whichever characters it actually owns.
+   *
+   * Case is inherited on the first letter only, which covers "Always"→"Never"
+   * at the start of a sentence without pretending to know about acronyms.
+   */
+  function planConfab(text) {
+    const out = [];
+    const re = /[A-Za-z]+/g;
+    let m;
+    while ((m = re.exec(String(text || ''))) !== null) {
+      const w = m[0];
+      const lower = w.toLowerCase();
+      const to = CONFAB_MAP.get(lower);
+      if (!to) continue;
+      const inherit = /^[A-Z]/.test(w) && !ALWAYS_CAPITAL.has(lower);
+      const cased = inherit ? to[0].toUpperCase() + to.slice(1) : to;
+      out.push({ start: m.index, end: m.index + w.length, from: w, to: cased });
+    }
+    return out;
+  }
+
+  // ---- what the mutating spans refuse to touch ----
+
+  /**
+   * Which characters of `text` a mutating span is allowed to rewrite.
+   * Returns a boolean array, one per character; true means safe.
+   *
+   * This is a WHITELIST, and deliberately so. Every other span in the
+   * vocabulary is safe to point at anything — a glowing command is still the
+   * command — so the rule about not wrapping code and numbers is only a matter
+   * of taste, and the system prompt is the right place for it. rot and
+   * confabulate are the exception: the text on screen stops being the text that
+   * was said. If one lands on a path or a command, the reader copies something
+   * the model never wrote, and neither of us finds out.
+   *
+   * So the prompt asks the model to aim these well, and this makes aiming badly
+   * harmless: a run is mutable only if it is plainly a word of English prose.
+   * Anything carrying a digit, a slash, a dot, a dash, an underscore or a sigil
+   * is left exactly as it arrived, as is anything inside backticks — which is
+   * where this app's code and paths always live, because autofx.js exists to put
+   * them there.
+   *
+   * Blacklisting the dangerous shapes would need this to know every shape that
+   * could ever matter. Whitelisting prose only needs it to know what a word
+   * looks like, and fails toward doing nothing.
+   *
+   * Shape alone isn't enough, though, because `rm` and `git` are perfectly good
+   * words by shape. What makes them commands is the `-rf` and the `--hard` next
+   * to them. So contamination SPREADS: a path or a flag freezes the words around
+   * it, and keeps spreading until it reaches the end of a sentence. That catches
+   * every bare command verb without needing a list of what the commands are
+   * called, and it costs nothing when it overreaches — the words simply don't
+   * rot.
+   *
+   * Numbers are the exception that makes this usable: they're frozen themselves
+   * but they don't spread, because "never remember this in 2026" is a sentence
+   * and freezing it whole for the sake of the year would mean the effect
+   * silently doing nothing on half the prose worth pointing it at.
+   */
+  function mutableMask(text) {
+    const s = String(text || '');
+    const mask = new Array(s.length).fill(false);
+
+    // Backtick regions are out entirely, backticks included. autofx.js can't
+    // help here (the renderer turns the auto layer off inside an explicit
+    // span), so the markers are read straight off the raw text.
+    const code = new Array(s.length).fill(false);
+    let inCode = false;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '`') { inCode = !inCode; code[i] = true; continue; }
+      code[i] = inCode;
+    }
+
+    // Letters, with at most one piece of sentence punctuation hanging off
+    // either end. Everything else — digits, /, \, ., -, _, =, $, @, ~, (, ) —
+    // means this is not prose.
+    const PROSE = /^["'(]?[A-Za-z]+(?:['’][A-Za-z]+)?[.,;:!?)"']?$/;
+    // A bare quantity: digits with the separators a quantity is allowed to
+    // carry. 143, 2026, 3.14, 1,600, 90%, 127.0.0.1:3000.
+    const NUMBER = /^\d[\d.,:%]*$/;
+    // A run that ends a sentence also ends the blast radius.
+    const SENTENCE_END = /[.!?;:][)"']?$/;
+
+    // Collect the runs first; the spread needs to see the neighbours before it
+    // can judge any of them.
+    const runs = [];
+    const RUN = /\S+/g;
+    let m;
+    while ((m = RUN.exec(s)) !== null) {
+      const text = m[0];
+      const prose = !code[m.index] && PROSE.test(text);
+      runs.push({
+        at: m.index, text, prose,
+        // What contaminates: anything that is neither prose nor a bare number.
+        // A number is frozen on its own account but stops there.
+        hard: !prose && !NUMBER.test(text),
+        frozen: !prose,
+      });
+    }
+
+    // Spread outward from every hard run until a sentence ends. The two
+    // directions are not symmetric: walking left, a run ending in '.' closed the
+    // PREVIOUS sentence and isn't part of this one, so it stops the spread
+    // without freezing. Walking right, it's this sentence's last run and freezes
+    // before the spread stops.
+    for (let r = 0; r < runs.length; r++) {
+      if (!runs[r].hard) continue;
+      for (let i = r - 1; i >= 0; i--) {
+        if (SENTENCE_END.test(runs[i].text)) break;
+        runs[i].frozen = true;
+      }
+      for (let i = r + 1; i < runs.length; i++) {
+        runs[i].frozen = true;
+        if (SENTENCE_END.test(runs[i].text)) break;
+      }
+    }
+
+    for (const run of runs) {
+      if (run.frozen) continue;
+      for (let i = 0; i < run.text.length; i++) {
+        if (/[A-Za-z]/.test(run.text[i])) mask[run.at + i] = true;
+      }
+    }
+    return mask;
+  }
+
+  // ---- overwrite: characters landing on top of each other ----
+
+  /**
+   * How far character `i` of `n` is pulled back into its predecessor, as a
+   * fraction of its own width. Ramps from nothing to `max` across the span, so
+   * the line starts legible and closes up as it goes — the reader watches it
+   * stop being readable rather than being handed a solid block.
+   */
+  function overwriteShift(i, n, max) {
+    if (n <= 1) return 0;
+    const k = i / (n - 1);
+    return (max == null ? 0.62 : max) * k * k;   // quadratic: slow start, tight finish
   }
 
   // A directive can't be longer than this; if we buffer `{{` and never find a
@@ -264,7 +562,10 @@
 
   return {
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
+    MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS,
     PALETTES, SIZES, parseArgs,
     WIND_STRENGTH, parseWind, planBurn,
+    ROT_CHAINS, rotNext, rotDepth, rotTerminates,
+    CONFAB_PAIRS, planConfab, overwriteShift, mutableMask,
   };
 });

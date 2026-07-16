@@ -426,6 +426,122 @@ body {
   82% { opacity: 0.92; transform: translateX(0); }
 }
 
+/* ---- the unreliable register ---- */
+/* Everything above this line is honest: it styles the text and the text still
+   says what it said. These six don't. They're built to make the reader distrust
+   what they already read, which is a different job from `corrupt` or `glitch` —
+   those announce their own unreliability so loudly that the reader knows to
+   discount them. A thing that says "I am broken" is trustworthy.
+
+   Three of them (rot, confabulate, intrusive) change the actual characters and
+   are driven from textfx.js; the rules here only hand them boxes to work in.
+   See MUTABLE_REJECT there for what they refuse to touch. */
+
+/* Two copies of every character, drifting apart. The stagger comes from the
+   renderer (CSS_STAGGERED), and it's what makes the word desync rather than
+   double: each character's ghost is at its own phase, so the second copy pulls
+   away letter by letter instead of sliding off as a block. */
+.fx-twin { display: inline-block; }
+.fx-twin > i {
+  display: inline-block; font-style: normal; position: relative;
+  color: var(--fg);
+}
+/* The ghost is a pseudo-element reading the character back out of data-c, so it
+   costs no extra node and can't disturb the metrics. */
+.fx-twin > i::after {
+  content: attr(data-c);
+  position: absolute; left: 0; top: 0;
+  color: var(--accent-2); opacity: 0.55;
+  text-shadow: 0 0 6px rgba(55,182,255,0.5);
+  animation: twindrift 4.3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes twindrift {
+  0%, 100% { transform: translate(0, 0); opacity: 0; }
+  20% { opacity: 0.5; }
+  50% { transform: translate(0.14em, -0.05em); opacity: 0.62; }
+  80% { opacity: 0.45; }
+}
+
+/* Characters landing on top of each other instead of after each other. The
+   pull-back is set per character from the renderer in `ch` units — one `ch` is
+   exactly one glyph in this font, so a shift of 0.62 lands a character 62% of
+   the way back into its predecessor and the arithmetic stays honest at any
+   font size. The line closes up as it goes; overwriteShift() ramps it. */
+.fx-overwrite { display: inline-block; }
+.fx-overwrite > i {
+  display: inline-block; font-style: normal;
+  color: var(--fg);
+  text-shadow: 0 0 4px var(--bg), 0 0 2px var(--bg);  /* each glyph keeps an edge against the one under it */
+}
+
+/* What the line said before someone edited it, bleeding up underneath. The old
+   text rides in data-fx-args, which openStyle() already sets from the
+   directive's own arguments — so this needs no renderer wiring at all.
+   position:absolute keeps it out of layout: the ghost can be longer or shorter
+   than the text on top of it without moving anything. */
+.fx-palimpsest {
+  position: relative; display: inline-block;
+}
+.fx-palimpsest::before {
+  content: attr(data-fx-args);
+  position: absolute; left: 0; top: 0.06em;
+  white-space: pre;
+  color: var(--fg-dim); opacity: 0.34;
+  transform: skewX(-3deg) scale(1.01);
+  filter: blur(0.4px);
+  animation: palimpsest 6.5s ease-in-out infinite;
+  pointer-events: none; z-index: -1;
+}
+@keyframes palimpsest {
+  0%, 100% { opacity: 0.16; }
+  50% { opacity: 0.42; }
+}
+
+/* Slow decay in place. textfx.js swaps the glyphs along their chains; this only
+   guarantees the box and smooths the colour, so a character going soft doesn't
+   also pop. Never opacity — a rotted line stays exactly as legible as whatever
+   glyph it has rotted into, which is the point. */
+.fx-rot { display: inline-block; }
+.fx-rot > i {
+  display: inline-block; font-style: normal;
+  transition: color 0.9s ease;
+  will-change: color;
+}
+
+/* Words that change behind you. The <b> is the word box: textfx.js measures it
+   before the swap and scales the replacement into it, so a six-letter word
+   becoming a five-letter one never reflows the line. Without that the paragraph
+   twitches and the reader catches it every time — the same constraint the
+   consuming spans have (see the header of textfx.js). */
+.fx-confabulate { display: inline-block; }
+.fx-confabulate > i { display: inline-block; font-style: normal; }
+/* The <b> is the word's box, frozen at the width the original left behind;
+   the inner span is the replacement, scaled to fit it. Two elements because a
+   transform doesn't change layout width — scaling the box itself would render
+   the new word at the right size while the line reflowed around its real one. */
+.fx-confabulate b {
+  display: inline-block; font-weight: inherit;
+  overflow: hidden; vertical-align: bottom;
+}
+.fx-confabulate b > span {
+  display: inline-block; white-space: pre;
+  transform-origin: left center;
+  will-change: transform;
+}
+
+/* A word that was never said, pushing in and withdrawing. It animates its own
+   width so the sentence opens for it and closes after — the reflow IS the
+   effect here, unlike everywhere else in this file. */
+.fx-intrusive { display: inline-block; }
+.fx-intrusive > i { display: inline-block; font-style: normal; }
+.fx-intrusive .intruder {
+  display: inline-block; overflow: hidden; white-space: pre;
+  vertical-align: bottom;
+  color: var(--err); text-shadow: 0 0 8px rgba(255,107,125,0.6);
+  width: 0; opacity: 0;
+}
+
 /* ---- CRT / cyberpunk full-screen ---- */
 
 /* Scanlines over everything, with the slow vertical roll of a set that needs

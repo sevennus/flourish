@@ -27,6 +27,17 @@ const SHOWCASE =
   "{{fx:lightning}}lightning for a hard truth, {{fx:shatter}}shattering glass when it breaks badly, " +
   "and {{fx:glitch}}a channel tear when it all goes wrong. {{fx:shake}}\n\n" +
   "And when it really lands — {{fx:nova}}{{fx:glow}}a nova{{/fx:glow}}. {{fx:pulse}}\n\n" +
+  // The unreliable register. Everything above is honest — a glowing command is
+  // still the command — and these are not: they change the text after you've
+  // read it. The words inside the mutating spans are deliberately throwaway,
+  // because smoke.js spot-checks this paragraph and rot WILL eat whatever it is
+  // pointed at. "The unreliable ones" sits outside them on purpose.
+  "The unreliable ones: two copies {{fx:twin}}drift apart{{/fx:twin}}, characters " +
+  "{{fx:overwrite}}land on top of each other{{/fx:overwrite}}, " +
+  "{{fx:palimpsest and this is what it said before}}an edit shows its workings{{/fx:palimpsest}}, " +
+  "{{fx:rot}}this line will not survive being read twice{{/fx:rot}}, " +
+  "{{fx:confabulate}}you will always remember it correctly{{/fx:confabulate}}, and " +
+  "{{fx:apophenia}}lines link what was never linked. {{fx:dilate}} Then it just stops for a beat. {{fx:ripple mono}}\n\n" +
   "Every one of those was written into my reply by the {{fx:wave}}flourish protocol{{/fx:wave}} — " +
   "the same channel real Claude Code uses over SSH. The terminal adds its own on top: `inline code`, " +
   "**bold**, and numbers like 16000 highlight themselves, and every tool call paints its own shape. " +

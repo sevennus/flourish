@@ -199,9 +199,27 @@ test('args are case-insensitive', () => {
 // prompt, and the effect just never plays with nothing to show for it.
 
 test('every point effect is handled by the engine', () => {
+  const { RENDERER_EFFECTS } = require('../src/flourish');
   const src = read('src/effects.js');
   for (const n of POINT_EFFECTS) {
+    if (RENDERER_EFFECTS.has(n)) continue;   // handled before the engine ever sees it
     assert.ok(src.includes(`case '${n}':`), `effects.js fire() has no case for ${n}`);
+  }
+});
+
+test('the renderer-handled effects are handled by the renderer', () => {
+  // dilate paints nothing — it stalls the typewriter — so it's the one point
+  // effect with no engine case. That has to be because the renderer intercepts
+  // it, not because someone forgot to write it: a name in POINT_EFFECTS that
+  // nothing implements is a directive that silently does nothing on screen.
+  const { RENDERER_EFFECTS } = require('../src/flourish');
+  const rend = read('src/renderer.js');
+  assert.ok(RENDERER_EFFECTS.size, 'expected at least one renderer-handled effect');
+  assert.match(rend, /RENDERER_EFFECTS\.has\(ev\.name\)/,
+    'applyEvents must route renderer effects away from the engine');
+  for (const n of RENDERER_EFFECTS) {
+    assert.ok(POINT_EFFECTS.has(n), `${n} must still be a point effect the parser knows`);
+    assert.ok(rend.includes(`'${n}'`), `renderer.js never mentions ${n}`);
   }
 });
 
@@ -277,9 +295,14 @@ test('the text-effects reference sheet covers every style span', () => {
   }
 });
 
-test('the vocabulary is the full 50 effects', () => {
-  assert.strictEqual(POINT_EFFECTS.size, 30);
-  assert.strictEqual(STYLE_SPANS.size, 20);
+test('the vocabulary is the full 58 effects', () => {
+  // The count is asserted because the installed .exe embeds its own copy of
+  // prompt.js, so the vocabulary Claude actually has is the one in the BUILD,
+  // not the one in the repo. A session once reported "all 40 verified" against
+  // a repo holding 50. A bare number here is the cheapest way to make that
+  // drift fail loudly instead of quietly.
+  assert.strictEqual(POINT_EFFECTS.size, 32);
+  assert.strictEqual(STYLE_SPANS.size, 26);
 });
 
 test('the consuming spans are taught with their guardrail', () => {
@@ -296,6 +319,45 @@ test('the consuming spans are taught with their guardrail', () => {
     'the prompt must say plainly that these destroy text');
   assert.match(FLOURISH_SYSTEM_PROMPT, /NEVER burn a sentence the reader needs/,
     'the prompt must scope consuming spans away from load-bearing text');
+});
+
+test('the unreliable spans are taught with their guardrail', () => {
+  // rot and confabulate are the only effects in the app where the text on
+  // screen stops being the text that was said. The prompt has to say so, and
+  // has to aim them away from anything the reader would act on — the same job
+  // the burn paragraph does, for a sharper edge.
+  const { MUTATING_SPANS } = require('../src/flourish');
+  for (const n of MUTATING_SPANS) {
+    assert.ok(FLOURISH_SYSTEM_PROMPT.includes(`{{fx:${n}`), `prompt never teaches ${n}`);
+  }
+  assert.match(FLOURISH_SYSTEM_PROMPT, /CHANGE THE TEXT/,
+    'the prompt must say plainly that these rewrite what was said');
+  assert.match(FLOURISH_SYSTEM_PROMPT, /never at instructions, results/,
+    'the prompt must scope the unreliable spans away from load-bearing text');
+});
+
+test('the mutating spans actually consult the guard', () => {
+  // The guard is the reason a careless unreliable span degrades to doing
+  // nothing instead of to lying about a command. mutableMask() being correct
+  // (see unreliable.test.js) is worth nothing if textfx never calls it, and
+  // that's a wiring mistake no visual check would ever catch — the effect looks
+  // completely fine either way. It only shows up as a wrong path, once, in
+  // whatever Jim pastes into a shell.
+  const src = read('src/textfx.js');
+  // Anchor on the method DEFINITION (trailing brace), not the dispatch call in
+  // play() that shares its name.
+  const body = (name, next) =>
+    src.slice(src.indexOf(`${name}(span, chars, args) {`), src.indexOf(`${next}(span, chars, args) {`));
+
+  assert.match(body('_rot', '_confabulate'), /this\._mutable\(chars\)/,
+    'rot must ask the guard what it may touch');
+  assert.match(body('_confabulate', '_intrusive'), /mutableMask/,
+    'confabulate must ask the guard what it may touch');
+
+  // And the guard has to be the real one, not a local re-implementation that
+  // could drift from the tested version.
+  assert.match(src, /window\.Flourish\.mutableMask/,
+    'textfx must use the shared mask, not its own copy');
 });
 
 test('consuming spans are driven from JS, not CSS', () => {
@@ -319,12 +381,28 @@ test('consuming spans are driven from JS, not CSS', () => {
   }
 });
 
-test('the renderer plays consuming spans when they close', () => {
+test('the renderer plays scripted spans when they close', () => {
   // They can only run once every character exists, which is the moment the
   // closing directive lands. Igniting on open would set fire to a word that
-  // hadn't finished being typed.
+  // hadn't finished being typed; rewriting on open would swap a word that
+  // hadn't finished arriving.
   const rend = read('src/renderer.js');
-  const close = rend.slice(rend.indexOf('function closeStyle'), rend.indexOf('function closeStyle') + 600);
-  assert.match(close, /CONSUMING_SPANS\.has\(name\)/, 'closeStyle must check for a consuming span');
+  const close = rend.slice(rend.indexOf('function closeStyle'), rend.indexOf('function closeStyle') + 700);
+  assert.match(close, /SCRIPTED_SPANS\.has\(name\)/, 'closeStyle must check for a scripted span');
   assert.match(close, /textFX\.play\(/, 'closeStyle must hand off to textfx');
+});
+
+test('every scripted span is actually dispatched by textfx', () => {
+  // SCRIPTED_SPANS is what the renderer hands to textFX.play(). A name in the
+  // set that play() doesn't dispatch is a span that renders as plain text and
+  // never tells anyone.
+  const { SCRIPTED_SPANS, CONSUMING_SPANS, MUTATING_SPANS } = require('../src/flourish');
+  const src = read('src/textfx.js');
+  const play = src.slice(src.indexOf('play(name, span, args)'), src.indexOf('_mutable(chars)'));
+  for (const n of SCRIPTED_SPANS) {
+    assert.match(play, new RegExp(`name === '${n}'`), `textfx play() never dispatches ${n}`);
+  }
+  for (const n of [...CONSUMING_SPANS, ...MUTATING_SPANS]) {
+    assert.ok(SCRIPTED_SPANS.has(n), `${n} needs the whole span but isn't scripted`);
+  }
 });
