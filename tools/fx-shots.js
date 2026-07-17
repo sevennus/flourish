@@ -257,6 +257,17 @@ async function run() {
     ['cat', 1600],
     ['wardial-grid', 1500],
     ['portscan-grid', 1300],
+    // Volume II — the cheeky ten, each caught mid-play.
+    ['snake', 2600],
+    ['invaders', 2200],
+    ['pacman', 1400],
+    ['ufo', 2400],
+    ['blackhole', 1500],
+    ['life', 2000],
+    ['melt', 2200],
+    ['quake', 900],
+    ['dvd', 2600],
+    ['aquarium', 2200],
   ];
   console.log('grid scenes (over prose, fired the way applyEvents fires them):');
   for (const [label, delay] of GRID_SHOTS) {

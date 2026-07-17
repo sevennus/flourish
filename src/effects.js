@@ -138,6 +138,9 @@
     crack: A.planCrack, gibson: A.planGibson,
     skull: A.planSkull, wireframe: A.planWireframe, plasma: A.planPlasma,
     tunnel: A.planTunnel, firewall: A.planFirewall, cat: A.planCat,
+    snake: A.planSnake, invaders: A.planInvaders, pacman: A.planPacman,
+    ufo: A.planUfo, blackhole: A.planBlackhole, life: A.planLife,
+    melt: A.planMelt, quake: A.planQuake, dvd: A.planDvd, aquarium: A.planAquarium,
   };
 
   // The terminal's own stack, so a scene sits in the same face as the prose
@@ -1175,6 +1178,17 @@
       return m ? (m[1] + ',' + m[2] + ',' + m[3]) : '5,7,10';
     }
 
+    // Every on-screen character as a flat list — grid cell coords plus its
+    // measured pixel position. The medium the volume-II effects eat, orbit,
+    // melt and swim through. Keyed by row*4096+col in the snapshot.
+    _cellList(G) {
+      const out = [];
+      G.cells.forEach((v, key) => {
+        out.push({ c: key % 4096, r: (key / 4096) | 0, ch: v.ch, x: v.x, y: v.y });
+      });
+      return out;
+    }
+
     // The shared fields every grid scene carries: its snapshot, its baseline
     // offset, and how far the text has scrolled since it was measured.
     _gridExtra(o) {
@@ -1642,6 +1656,385 @@
       }
     }
 
+    // ---- grid register, volume II: fire + step ----
+    //
+    // Each _<name> builds the scene from a measured grid (nothing without one),
+    // and its motion runs in a _step<Name> called from _update so it gets real
+    // dt. Nothing here mutates the DOM: every eaten pellet, abducted word and
+    // melted line is a knockout drawn on canvas over untouched text, so the
+    // prose is whole again the instant the scene is reaped.
+
+    _gridScene(kind, o, extra, max) {
+      const G = o.grid;
+      if (!G || !ASCII_PLAN[kind]) return null;
+      const plan = ASCII_PLAN[kind]();
+      if (!plan) return null;
+      return this._scene(kind, o, Object.assign(this._gridExtra(o), extra, { plan, max }));
+    }
+
+    _cellKey(c, r) { return r * 4096 + c; }
+
+    // snake — seeks the nearest uneaten character, one grid cell per step, and
+    // grows each time it swallows one.
+    _snake(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      const food = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (food.length < 6) return;
+      const sc = Math.round((x - G.left) / G.cellW);
+      const sr = Math.round((y - G.top) / G.lineH);
+      const S = this._gridScene('snake', o, {
+        food, foodByKey: null, body: null, dir: { c: 1, r: 0 },
+        acc: 0, eaten: {}, ate: 0,
+      }, 6500);
+      if (!S) return;
+      S.foodByKey = {};
+      for (const f of food) S.foodByKey[this._cellKey(f.c, f.r)] = f;
+      S.body = [];
+      for (let i = 0; i < S.plan.len0; i++) S.body.push({ c: sc - i, r: sr });
+    }
+
+    _stepSnake(S, dt) {
+      S.acc += dt;
+      if (S.acc < S.plan.stepMs) return;
+      S.acc = 0;
+      const head = S.body[0];
+      // Nearest uneaten cell, by manhattan distance on the grid.
+      let tgt = null, best = 1e9;
+      for (const f of S.food) {
+        const k = this._cellKey(f.c, f.r);
+        if (S.eaten[k]) continue;
+        const d = Math.abs(f.c - head.c) + Math.abs(f.r - head.r);
+        if (d < best) { best = d; tgt = f; }
+      }
+      if (!tgt || S.ate >= S.plan.maxEat) { S.life = Math.max(S.life, S.max - 700); return; }
+      // Step toward it on the axis with the greater gap, never reversing.
+      const neck = S.body[1] || head;
+      const dc = tgt.c - head.c, dr = tgt.r - head.r;
+      let step = Math.abs(dc) >= Math.abs(dr) ? { c: Math.sign(dc), r: 0 } : { c: 0, r: Math.sign(dr) };
+      if (head.c + step.c === neck.c && head.r + step.r === neck.r) {
+        step = Math.abs(dc) >= Math.abs(dr) ? { c: 0, r: Math.sign(dr) || 1 } : { c: Math.sign(dc) || 1, r: 0 };
+      }
+      const nh = { c: head.c + step.c, r: head.r + step.r };
+      S.body.unshift(nh);
+      const k = this._cellKey(nh.c, nh.r);
+      if (S.foodByKey[k] && !S.eaten[k]) {
+        S.eaten[k] = 1; S.ate++;
+        for (let g = 0; g < S.plan.grow; g++) S.body.push(Object.assign({}, S.body[S.body.length - 1]));
+      } else {
+        S.body.pop();
+      }
+    }
+
+    // invaders — a formation marches and creeps down; a cannon sweeps the
+    // bottom auto-firing; shots kill invaders, invaders bomb the prose.
+    _invaders(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      const S = this._gridScene('invaders', o, {
+        ox: 3, oy: 1, mdir: 1, macc: 0, foot: 0, step: 0,
+        shots: [], bombs: [], flashes: {}, sacc: 0,
+        cannon: Math.round(G.cols / 2), cdir: 1, dead: {},
+      }, 8000);
+      if (!S) return;
+      void x; void y;
+    }
+
+    _stepInvaders(S, dt) {
+      const G = S.grid, P = S.plan;
+      const cw = 5, rh = 2;   // cells between invaders
+      S.macc += dt;
+      if (S.macc >= P.stepMs) {
+        S.macc = 0; S.step++; S.foot ^= 1;
+        S.ox += S.mdir;
+        const rightCol = S.ox + (P.cols - 1) * cw + 4;
+        if (rightCol >= G.cols - 2 || S.ox <= 1) { S.mdir *= -1; S.oy += P.dropEvery > 0 ? 1 : 0; }
+        // Bombing run: a live invader drops on a column of prose.
+        if (Math.random() < P.bombP) {
+          const live = [];
+          for (let i = 0; i < P.rows; i++) for (let j = 0; j < P.cols; j++) if (!S.dead[i * 99 + j]) live.push([i, j]);
+          if (live.length) {
+            const [i, j] = live[(Math.random() * live.length) | 0];
+            S.bombs.push({ c: S.ox + j * cw + 1, r: S.oy + i * rh + 1, y: 0 });
+          }
+        }
+      }
+      // Cannon sweeps and fires.
+      S.cannon += S.cdir * (dt * 0.012);
+      if (S.cannon > G.cols - 3 || S.cannon < 2) S.cdir *= -1;
+      S.sacc += dt;
+      if (S.sacc >= P.shotMs) { S.sacc = 0; S.shots.push({ c: Math.round(S.cannon), y: (G.rows - 2) * G.lineH }); }
+      for (const sh of S.shots) sh.y -= dt * 0.5;
+      // Shot vs invader.
+      for (const sh of S.shots) {
+        if (sh.dead) continue;
+        const rr = Math.round((sh.y) / G.lineH);
+        for (let i = 0; i < P.rows; i++) for (let j = 0; j < P.cols; j++) {
+          if (S.dead[i * 99 + j]) continue;
+          const ir = S.oy + i * rh, ic = S.ox + j * cw;
+          if (rr >= ir && rr <= ir + 1 && sh.c >= ic && sh.c <= ic + 3) {
+            S.dead[i * 99 + j] = 1; sh.dead = 1;
+            this.emit(G.left + ic * G.cellW, G.top + ir * G.lineH, { n: 10, colors: PALETTES.ember, speedMax: 4 });
+          }
+        }
+      }
+      S.shots = S.shots.filter((sh) => !sh.dead && sh.y > 0);
+      for (const b of S.bombs) { b.y += dt * 0.28; b.row = Math.round((b.r * G.lineH + b.y) / G.lineH); }
+      S.bombs = S.bombs.filter((b) => b.r * G.lineH + b.y < G.h);
+      // All dead → wrap up.
+      let any = false;
+      for (let i = 0; i < P.rows; i++) for (let j = 0; j < P.cols; j++) if (!S.dead[i * 99 + j]) any = true;
+      if (!any) S.life = Math.max(S.life, S.max - 900);
+    }
+
+    // pacman — eats a line of prose left to right; a ghost chases.
+    _pacman(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      const rows = {};
+      for (const c of this._cellList(G)) { if (c.ch && c.ch.trim()) (rows[c.r] = rows[c.r] || []).push(c); }
+      // The row nearest the caret with a decent run to eat.
+      let row = null, best = 1e9;
+      for (const k in rows) {
+        if (rows[k].length < 6) continue;
+        const rr = +k, d = Math.abs(rr * G.lineH + G.top - y);
+        if (d < best) { best = d; row = rows[k]; }
+      }
+      if (!row) return;
+      row.sort((a, b) => a.c - b.c);
+      const S = this._gridScene('pacman', o, {
+        row, i: 0, x: row[0].c - 2, chomp: 0, eaten: {},
+      }, row.length * 130 + 2600);
+      if (!S) return;
+      S.rr = row[0].r;
+    }
+
+    _stepPacman(S, dt) {
+      S.x += S.plan.speed * dt / 16;   // plan.speed is columns per frame
+      S.chomp = (S.chomp + dt) % (S.plan.chompMs * 2);
+      // Eat any pellet the mouth has reached.
+      while (S.i < S.row.length && S.row[S.i].c <= S.x) {
+        S.eaten[this._cellKey(S.row[S.i].c, S.row[S.i].r)] = 1; S.i++;
+      }
+      if (S.i >= S.row.length && S.x > S.row[S.row.length - 1].c + 3) S.life = Math.max(S.life, S.max - 500);
+    }
+
+    // ufo — flies in, hovers over a word, tractor-beams its characters up.
+    _ufo(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      // A run of 3+ letters near the caret to abduct.
+      let tgt = null, best = 1e9;
+      for (const run of G.runs) {
+        if (run.text.replace(/\W/g, '').length < 3) continue;
+        const d = Math.abs(run.y - y) + Math.abs(run.x - x) * 0.2;
+        if (d < best) { best = d; tgt = run; }
+      }
+      if (!tgt) return;
+      const chars = [];
+      for (let k = 0; k < tgt.text.length; k++) {
+        if (!tgt.text[k].trim()) continue;
+        chars.push({ ch: tgt.text[k], x: tgt.x + k * G.cellW, y: tgt.y, lift: 0 });
+      }
+      const S = this._gridScene('ufo', o, {
+        chars, tx: tgt.x + (tgt.text.length * G.cellW) / 2, ty: tgt.y,
+        sx: G.left + (o.grid.plan && 0), phase: 'enter', pt: 0,
+      }, 5200);
+      if (!S) return;
+      S.sx = S.plan.dir < 0 ? G.left + G.w + 60 : G.left - 60;
+      S.sy = Math.max(G.top + G.lineH, S.ty - G.lineH * 4);
+    }
+
+    _stepUfo(S, dt) {
+      const P = S.plan;
+      S.pt += dt;
+      if (S.phase === 'enter') {
+        S.sx += (S.tx - S.sx) * Math.min(1, dt * 0.004);
+        if (Math.abs(S.sx - S.tx) < 6) { S.phase = 'beam'; S.pt = 0; S.sx = S.tx; }
+      } else if (S.phase === 'beam') {
+        if (S.pt > 400) { S.phase = 'lift'; S.pt = 0; }
+      } else if (S.phase === 'lift') {
+        for (const c of S.chars) c.lift = Math.min(1, c.lift + dt * 0.0016);
+        if (S.pt > P.hover && S.chars.every((c) => c.lift >= 1)) { S.phase = 'leave'; S.pt = 0; }
+      } else if (S.phase === 'leave') {
+        const away = P.dir < 0 ? -1 : 1;
+        S.sx += away * dt * 0.5;
+        for (const c of S.chars) c.lift = Math.max(0, c.lift - dt * 0.0008);
+        if (S.sx < S.grid.left - 80 || S.sx > S.grid.left + S.grid.w + 80) S.life = Math.max(S.life, S.max - 300);
+      }
+    }
+
+    // blackhole — a singularity; nearby characters spiral in and stretch.
+    _blackhole(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      const cx = Math.min(Math.max(x, G.left + 80), G.left + G.w - 80);
+      const cy = Math.min(Math.max(y, G.top + 60), G.top + G.h - 60);
+      const near = this._cellList(G).filter((c) => c.ch && c.ch.trim()
+        && Math.hypot(c.x - cx, c.y - cy) < ASCII_PLAN.blackhole().radius);
+      const S = this._gridScene('blackhole', o, {
+        cx, cy, near: near.map((c) => ({
+          ch: c.ch, x0: c.x, y0: c.y,
+          r0: Math.hypot(c.x - cx, c.y - cy), a0: Math.atan2(c.y - cy, c.x - cx),
+        })),
+      }, 3200);
+      void S;
+    }
+
+    // life — Conway seeded from the ink of the screen.
+    _life(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      // Grid dims live under lcols/lrows, NOT cols/rows: a numeric `rows` field
+      // collides with the banner's array `rows` in the probe's reveal-timing
+      // and planned oracles, which index it as S.rows[0]. Named apart, it can't.
+      const lcols = G.cols, lrows = G.rows;
+      const alive = new Uint8Array(lcols * lrows);
+      const charAt = {};
+      for (const c of this._cellList(G)) {
+        if (c.ch && c.ch.trim() && c.c < lcols && c.r < lrows) {
+          alive[c.r * lcols + c.c] = 1; charAt[c.r * lcols + c.c] = c;
+        }
+      }
+      const S = this._gridScene('life', o, {
+        alive, lcols, lrows, charAt, gen: 0, acc: 0,
+      }, 8000);
+      void S; void x; void y;
+    }
+
+    _stepLife(S, dt) {
+      S.acc += dt;
+      if (S.acc < S.plan.stepMs) return;
+      S.acc = 0;
+      if (A.stepLife) S.alive = A.stepLife(S.alive, S.lcols, S.lrows);
+      if (++S.gen >= S.plan.gens) S.life = Math.max(S.life, S.max - 600);
+    }
+
+    // melt — every column drips downward, then eases home.
+    _melt(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (!cells.length) return;
+      const colDelay = {};
+      const S = this._gridScene('melt', o, { cells, colDelay }, 5200);
+      if (!S) return;
+      for (const c of cells) if (colDelay[c.c] == null) colDelay[c.c] = Math.random() * S.plan.stagger;
+      void x; void y;
+    }
+
+    // quake — characters shake loose, fall into a heap, then spring home.
+    _quake(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (!cells.length) return;
+      const floorY = {};
+      const parts = cells.map((c) => ({
+        ch: c.ch, x0: c.x, y0: c.y, x: c.x, y: c.y, vy: 0,
+        delay: Math.random() * ASCII_PLAN.quake().fallSpread,
+        jx: (Math.random() - 0.5) * G.cellW * ASCII_PLAN.quake().jitter,
+      }));
+      const S = this._gridScene('quake', o, { parts, floorY }, 5000);
+      if (!S) return;
+      this._shake();
+      void x; void y;
+    }
+
+    _stepQuake(S, dt) {
+      const G = S.grid, P = S.plan;
+      const bottom = G.top + G.h - G.lineH;
+      // The heap can't grow taller than this, or a column that held forty
+      // characters towers four hundred pixels off the TOP of the screen (it
+      // did — measured). Past the ceiling, parts pile ON each other instead of
+      // stacking further, which reads as a dense drift along the bottom rather
+      // than an impossible spire.
+      const ceil = bottom - G.lineH * 7;
+      for (const p of S.parts) {
+        if (S.life < p.delay) continue;
+        if (S.life < P.home) {
+          p.vy += P.grav * dt;
+          p.y += p.vy * dt;
+          p.x += (p.jx / 400) * dt * 0.2;
+          const col = Math.round((p.x - G.left) / G.cellW);
+          const fy = S.floorY[col] != null ? S.floorY[col] : bottom;
+          if (p.y >= fy) { p.y = fy; p.vy = 0; S.floorY[col] = Math.max(ceil, fy - G.lineH); }
+        } else {
+          // Spring home.
+          p.x += (p.x0 - p.x) * Math.min(1, dt * 0.006);
+          p.y += (p.y0 - p.y) * Math.min(1, dt * 0.006);
+        }
+      }
+    }
+
+    // dvd — a word lifted off the screen, bouncing forever (well, for ~5s).
+    _dvd(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      let tgt = null;
+      for (const run of G.runs) {
+        const w = run.text.replace(/\W/g, '');
+        if (w.length >= 3 && w.length <= 9) { tgt = run; if (Math.abs(run.y - y) < G.lineH * 2) break; }
+      }
+      if (!tgt) return;
+      const S = this._gridScene('dvd', o, {
+        word: tgt.text.trim(), src: tgt,
+        x: tgt.x, y: tgt.y, corner: 0, cornerAt: -1,
+        hue: 0,
+      }, 6000);
+      if (!S) return;
+      S.hue = S.plan.hue;
+      S.vx = S.plan.vx; S.vy = S.plan.vy;
+    }
+
+    _stepDvd(S, dt) {
+      const G = S.grid;
+      const w = S.word.length * G.cellW, h = G.lineH;
+      const sp = S.plan.speed;
+      S.x += S.vx * sp * dt; S.y += S.vy * sp * dt;
+      let hx = false, hy = false;
+      if (S.x <= G.left) { S.x = G.left; S.vx = Math.abs(S.vx); hx = true; }
+      else if (S.x + w >= G.left + G.w) { S.x = G.left + G.w - w; S.vx = -Math.abs(S.vx); hx = true; }
+      if (S.y <= G.top + h) { S.y = G.top + h; S.vy = Math.abs(S.vy); hy = true; }
+      else if (S.y >= G.top + G.h - h) { S.y = G.top + G.h - h; S.vy = -Math.abs(S.vy); hy = true; }
+      if (hx || hy) S.hue = (S.hue + 47) % 360;
+      if (hx && hy) {
+        // THE COVETED CORNER.
+        S.corner++; S.cornerAt = S.life;
+        this._flash('rgba(255,220,90,0.25)');
+        this.emit(S.x, S.y, { n: 40, colors: PALETTES.gold, speedMax: 6, spread: Math.PI });
+      }
+    }
+
+    // aquarium — fish swim the lines, bubbles rise, the prose is the reef.
+    _aquarium(x, y, o) {
+      const G = o.grid;
+      if (!G) return;
+      const S = this._gridScene('aquarium', o, { bubbles: [] }, 6500);
+      if (!S) return;
+      // Start the fish spread ACROSS the tank, not queued up off one edge — at
+      // ~0.05 px/ms a fish spawned a full screen-width away never arrives inside
+      // a shot, and the tank photographs empty. (The probe missed this: a fish
+      // string drawn off-screen still counts as "own content". The screenshot
+      // is what caught it.)
+      for (const f of S.plan.fish) f.x = G.left + Math.random() * G.w;
+      void x; void y;
+    }
+
+    _stepAquarium(S, dt) {
+      const G = S.grid;
+      for (const f of S.plan.fish) {
+        f.x += f.speed * dt;
+        if (f.speed > 0 && f.x > G.left + G.w + 60) f.x = G.left - 60;
+        if (f.speed < 0 && f.x < G.left - 60) f.x = G.left + G.w + 60;
+      }
+      if (Math.random() < S.plan.bubbleP) {
+        S.bubbles.push({ x: G.left + Math.random() * G.w, y: G.top + G.h, r: Math.random() < 0.5 ? 'o' : '°', v: 0.03 + Math.random() * 0.04 });
+      }
+      for (const b of S.bubbles) b.y -= b.v * dt;
+      S.bubbles = S.bubbles.filter((b) => b.y > G.top);
+    }
+
     _drawAscii(ctx, S) {
       const t = S.life / S.max;
       // Hold, then go. An effect that eases across its whole lifetime finishes
@@ -2048,6 +2441,196 @@
               face ? S.accent : S.color, fade * out);
           }
         }
+      } else if (S.kind === 'snake') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        for (const k in S.eaten) {
+          const f = S.foodByKey[k];
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(f.x - 1, f.y, G.cellW + 2, (G.rh || G.lineH));
+        }
+        for (let i = S.body.length - 1; i >= 0; i--) {
+          const seg = S.body[i];
+          if (seg.c < 0 || seg.r < 0 || seg.c >= G.cols || seg.r >= G.rows) continue;
+          const head = i === 0;
+          const light = 48 + 34 * (1 - i / S.body.length);
+          ctx.fillStyle = 'hsla(' + S.plan.hue + ',82%,' + light + '%,' + fade + ')';
+          ctx.fillText(head ? '@' : (i % 2 ? 'o' : 'O'),
+            G.left + seg.c * G.cellW, G.top + seg.r * G.lineH + S.vOff);
+        }
+        ctx.fillStyle = 'rgba(' + S.dim + ',' + fade * 0.7 + ')';
+        ctx.fillText('ate ' + S.ate, G.left + 6, G.top + G.lineH * 0.9 + S.vOff);
+      } else if (S.kind === 'invaders') {
+        const G = S.grid, P = S.plan;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const INV = A.INVADER, CAN = A.CANNON;
+        const frame = S.foot ? INV.b : INV.a;
+        for (let i = 0; i < P.rows; i++) {
+          for (let j = 0; j < P.cols; j++) {
+            if (S.dead[i * 99 + j]) continue;
+            const ic = S.ox + j * 5, ir = S.oy + i * 2;
+            if (ir >= G.rows - 1) continue;
+            ctx.fillStyle = 'rgba(' + (i === 0 ? S.accent : S.color) + ',' + fade + ')';
+            for (let rr = 0; rr < 2; rr++) {
+              ctx.fillText(frame[rr], G.left + ic * G.cellW, G.top + (ir + rr) * G.lineH + S.vOff);
+            }
+          }
+        }
+        ctx.fillStyle = 'rgba(255,255,255,' + fade + ')';
+        for (const sh of S.shots) ctx.fillText('|', G.left + sh.c * G.cellW, G.top + sh.y + S.vOff);
+        ctx.fillStyle = 'rgba(' + S.accent + ',' + fade + ')';
+        for (const b of S.bombs) ctx.fillText('*', G.left + b.c * G.cellW, G.top + b.r * G.lineH + b.y + S.vOff);
+        const cc = Math.round(S.cannon);
+        ctx.fillStyle = 'rgba(' + S.color + ',' + fade + ')';
+        for (let rr = 0; rr < CAN.length; rr++) {
+          ctx.fillText(CAN[rr], G.left + (cc - 1) * G.cellW, G.top + (G.rows - 2 + rr) * G.lineH + S.vOff);
+        }
+      } else if (S.kind === 'pacman') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        const rY = G.top + S.rr * G.lineH;
+        for (const cell of S.row) {
+          if (!S.eaten[this._cellKey(cell.c, cell.r)]) continue;
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(cell.x - 1, cell.y, G.cellW + 2, (G.rh || G.lineH));
+        }
+        const px = G.left + S.x * G.cellW;
+        ctx.fillStyle = 'rgba(255,214,90,' + fade + ')';
+        ctx.fillText(S.chomp < S.plan.chompMs ? 'C' : 'O', px, rY + S.vOff);
+        const gx = px - S.plan.ghostGap * G.cellW;
+        if (gx > G.left - G.cellW) {
+          ctx.fillStyle = 'hsla(' + S.plan.ghostHue + ',85%,66%,' + fade + ')';
+          ctx.fillText('M', gx, rY + S.vOff);
+        }
+      } else if (S.kind === 'ufo') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        const SS = A.SAUCER;
+        if (S.phase === 'beam' || S.phase === 'lift') {
+          const half = (S.chars.length * G.cellW) / 2;
+          ctx.fillStyle = 'rgba(' + S.accent + ',' + fade * 0.16 + ')';
+          ctx.beginPath();
+          ctx.moveTo(S.sx - G.cellW * 1.5, S.sy + G.lineH);
+          ctx.lineTo(S.sx + G.cellW * 1.5, S.sy + G.lineH);
+          ctx.lineTo(S.tx + half, S.ty + G.lineH);
+          ctx.lineTo(S.tx - half, S.ty + G.lineH);
+          ctx.closePath(); ctx.fill();
+        }
+        for (const c of S.chars) {
+          if (c.lift <= 0) continue;
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(c.x - 1, c.y, G.cellW + 2, (G.rh || G.lineH));
+          const yy = c.y + (S.sy - c.y) * c.lift;
+          const xx = c.x + (S.sx - S.tx) * c.lift;
+          ctx.fillStyle = 'rgba(' + S.color + ',' + fade + ')';
+          ctx.fillText(c.ch, xx, yy + S.vOff);
+        }
+        ctx.fillStyle = 'rgba(' + S.color + ',' + fade + ')';
+        for (let rr = 0; rr < SS.length; rr++) {
+          ctx.fillText(SS[rr], S.sx - (SS[0].length * G.cellW) / 2, S.sy + (rr - 1) * G.lineH + S.vOff);
+        }
+      } else if (S.kind === 'blackhole') {
+        const G = S.grid, P = S.plan;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        const pull = S.life < P.pull ? Math.min(1, S.life / P.pull)
+          : Math.max(0, 1 - (S.life - P.pull) / (S.max - P.pull));
+        for (const c of S.near) {
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(c.x0 - 1, c.y0, G.cellW + 2, (G.rh || G.lineH));
+          const rr = c.r0 * (1 - pull * 0.92);
+          const aa = c.a0 + pull * P.spin * S.life;
+          const x = S.cx + Math.cos(aa) * rr, y = S.cy + Math.sin(aa) * rr;
+          const b = Math.max(0.25, 1 - rr / P.radius);
+          ctx.fillStyle = 'hsla(' + P.hue + ',82%,' + (55 + b * 32) + '%,' + fade + ')';
+          ctx.fillText(c.ch, x, y + S.vOff);
+        }
+        ctx.fillStyle = 'rgba(0,0,0,' + fade * pull + ')';
+        ctx.beginPath(); ctx.arc(S.cx, S.cy, 16 + 10 * pull, 0, TAU); ctx.fill();
+        ctx.strokeStyle = 'hsla(' + P.hue + ',90%,66%,' + fade * pull + ')';
+        ctx.lineWidth = 2; ctx.stroke();
+      } else if (S.kind === 'life') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        for (let r = 0; r < S.lrows; r++) {
+          for (let c = 0; c < S.lcols; c++) {
+            if (!S.alive[r * S.lcols + c]) continue;
+            const real = S.charAt[r * S.lcols + c];
+            if (real) {
+              ctx.fillStyle = 'hsla(' + S.plan.hue + ',80%,72%,' + fade + ')';
+              ctx.fillText(real.ch, real.x, real.y + S.vOff);
+            } else {
+              ctx.fillStyle = 'hsla(' + ((S.plan.hue + 34) % 360) + ',72%,58%,' + fade * 0.85 + ')';
+              ctx.fillText('o', G.left + c * G.cellW, G.top + r * G.lineH + S.vOff);
+            }
+          }
+        }
+      } else if (S.kind === 'melt') {
+        const G = S.grid, P = S.plan;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        const reform = S.life > S.max - P.hold ? (S.life - (S.max - P.hold)) / P.hold : 0;
+        const floor = G.top + G.h - G.lineH;
+        for (const c of S.cells) {
+          let drop = Math.max(0, S.life - (S.colDelay[c.c] || 0)) * P.speed;
+          drop = Math.min(drop, floor - c.y);
+          if (reform) drop *= (1 - reform);
+          if (drop <= 0.5) continue;
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(c.x - 1, c.y, G.cellW + 2, (G.rh || G.lineH));
+          const wob = Math.sin((c.y + drop) * 0.05 + c.c) * 1.3;
+          ctx.fillStyle = 'rgba(' + S.color + ',' + fade + ')';
+          ctx.fillText(c.ch, c.x + wob, c.y + drop + S.vOff);
+        }
+      } else if (S.kind === 'quake') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        for (const p of S.parts) {
+          if (S.life < p.delay) continue;
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(p.x0 - 1, p.y0, G.cellW + 2, (G.rh || G.lineH));
+          ctx.fillStyle = 'rgba(' + S.color + ',' + fade + ')';
+          ctx.fillText(p.ch, p.x, p.y + S.vOff);
+        }
+      } else if (S.kind === 'dvd') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+        ctx.fillRect(S.src.x - 1, S.src.y, S.src.w + 2, (G.rh || G.lineH));
+        ctx.fillStyle = 'hsl(' + Math.round(S.hue) + ',85%,62%)';
+        ctx.globalAlpha = fade;
+        ctx.fillText(S.word, S.x, S.y + S.vOff);
+        ctx.globalAlpha = 1;
+        if (S.cornerAt >= 0 && S.life - S.cornerAt < 1500) {
+          ctx.fillStyle = 'rgba(255,220,90,' + fade * (1 - (S.life - S.cornerAt) / 1500) + ')';
+          ctx.fillText('CORNER!  x' + S.corner, G.left + 10, G.top + G.lineH * 0.9 + S.vOff);
+        }
+      } else if (S.kind === 'aquarium') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        for (const f of S.plan.fish) {
+          const y = G.top + f.yF * G.h + Math.sin(S.life * 0.002 + f.phase) * G.lineH * 0.5;
+          const body = f.speed > 0 ? (f.big ? '><(((.>' : '><>') : (f.big ? '<.)))><' : '<><');
+          ctx.fillStyle = 'hsla(' + f.hue + ',75%,63%,' + fade + ')';
+          ctx.fillText(body, f.x, y + S.vOff);
+        }
+        ctx.fillStyle = 'rgba(150,220,255,' + fade * 0.7 + ')';
+        for (const b of S.bubbles) ctx.fillText(b.r, b.x, b.y + S.vOff);
       } else {
         // The line panes: wardial, sniffer, trace, daemon.
         const C = S.cell;
@@ -2281,6 +2864,14 @@
           }
         }
         if (S.kind === 'cat') this._updateCat(S, dt);
+        if (S.kind === 'snake') this._stepSnake(S, dt);
+        else if (S.kind === 'invaders') this._stepInvaders(S, dt);
+        else if (S.kind === 'pacman') this._stepPacman(S, dt);
+        else if (S.kind === 'ufo') this._stepUfo(S, dt);
+        else if (S.kind === 'life') this._stepLife(S, dt);
+        else if (S.kind === 'quake') this._stepQuake(S, dt);
+        else if (S.kind === 'dvd') this._stepDvd(S, dt);
+        else if (S.kind === 'aquarium') this._stepAquarium(S, dt);
         if (S.kind === 'skull' && A.jawDropAt) {
           const drop = A.jawDropAt(S.life, S.plan.chomps);
           if (S.lastDrop - drop > 0.5) {

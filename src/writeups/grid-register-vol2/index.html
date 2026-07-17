@@ -1,0 +1,103 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish — the grid register, volume II: ten cheeky effects</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  h3{font-size:14px;color:#9fd5e6;margin-top:22px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  ul li{margin:5px 0}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+  .back{display:inline-block;margin-bottom:18px;color:#94a3b8;text-decoration:none;font-size:13px}
+  .back:hover{color:#e0b54a}
+</style></head><body>
+
+<a class="back" href="../index.html">&larr; back to writeups</a>
+
+<h1>The grid register, volume II: ten cheeky effects</h1>
+<p class="meta">Branch <code>main</code> · flourish.js, effects.js, prompt.js, tools/ascii-probe.js, tools/fx-shots.js, test/ascii.test.js · 2026-07-17</p>
+
+<h2>The ask</h2>
+<blockquote>"i want to see 10 more ascii art effects like that. dont be afraid to be creative and cheeky."</blockquote>
+
+<p>"Like that" = the grid register: effects painted into the terminal's own character cells, built out
+of the prose already on screen, mutating nothing. Ten more, cheekier — mostly arcade and screensaver
+gags, each one doing something to your words.</p>
+
+<table>
+<tr><th>effect</th><th>the gag</th><th>what it does to the prose</th></tr>
+<tr><td><code>snake</code></td><td>the Nokia snake, slithering the grid</td><td>seeks the nearest character and eats it; the word goes dark and the snake grows</td></tr>
+<tr><td><code>invaders</code></td><td>a formation marches down; a cannon sweeps the bottom</td><td>invaders bomb your prose, shots blow invaders out of the sky</td></tr>
+<tr><td><code>pacman</code></td><td>waka-waka along a line, a ghost chasing</td><td>the characters ahead are pellets and vanish as they're eaten</td></tr>
+<tr><td><code>ufo</code></td><td>a saucer parks over a word and tractor-beams it</td><td>the word's characters rise off the line into the ship (and come back)</td></tr>
+<tr><td><code>blackhole</code></td><td>a singularity opens in the text</td><td>nearby characters spiral in and stretch toward the core, then fall back</td></tr>
+<tr><td><code>life</code></td><td>Conway's Game of Life</td><td>seeded from the ink of the screen — your own words breed, glider away and die</td></tr>
+<tr><td><code>melt</code></td><td>the screen turns to wax</td><td>every column of text sags and drips down, pools, then reforms</td></tr>
+<tr><td><code>quake</code></td><td>the ground shakes</td><td>characters rattle off their lines, fall into a heap at the bottom, spring home</td></tr>
+<tr><td><code>dvd</code></td><td>the screensaver dream</td><td>a word bounces around as a logo; hit a corner exactly and the crowd goes wild</td></tr>
+<tr><td><code>aquarium</code></td><td>the terminal floods</td><td>ascii fish swim the lines, bubbles rise, the prose is the reef</td></tr>
+</table>
+
+<p>Same architecture as volume I: each fact is a pure seeded planner in <code>flourish.js</code>
+(<code>node --test</code> pins it), and the geometry, motion and incorporation live in
+<code>effects.js</code> against a grid it can't see. Motion runs in <code>_step&lt;Name&gt;</code> from the
+update loop so it gets real <code>dt</code>; nothing mutates the DOM, so every eaten pellet, abducted
+word and melted line is a knockout drawn on canvas over untouched text — whole again the instant the
+scene is reaped. The one genuine algorithm, Conway's step, is pure and exported, and the tests pin it
+against a blinker and a block.</p>
+
+<div class="two">
+<figure><img src="scene-invaders.png" alt="invaders"><figcaption><code>invaders</code> — formation of <code>/oo\ &gt;--&gt;</code> marching, a <code>/^\ ###</code> cannon bottom-right, a shot <code>|</code>, bombs <code>*</code> falling on the prose.</figcaption></figure>
+<figure><img src="scene-blackhole.png" alt="blackhole"><figcaption><code>blackhole</code> — a bright accretion ring around a dark core; the words around it pulled apart and spiralling in.</figcaption></figure>
+<figure><img src="scene-life.png" alt="life"><figcaption><code>life</code> — Conway seeded from the text: the prose lit where alive, <code>o</code> colonies bred out into the margins.</figcaption></figure>
+<figure><img src="scene-snake.png" alt="snake"><figcaption><code>snake</code> — the body threading down through the paragraph, eating characters (the gaps) as it goes; score top-left.</figcaption></figure>
+<figure><img src="scene-ufo.png" alt="ufo"><figcaption><code>ufo</code> — a saucer over "question", tractor beam down, the word's letters lifting off the line.</figcaption></figure>
+<figure><img src="scene-quake.png" alt="quake"><figcaption><code>quake</code> at 900ms — characters mid-fall, a dense heap forming along the bottom.</figcaption></figure>
+<figure><img src="scene-melt.png" alt="melt"><figcaption><code>melt</code> — the whole screen sagging downward in wax, each column at its own pace.</figcaption></figure>
+<figure><img src="scene-aquarium.png" alt="aquarium"><figcaption><code>aquarium</code> — <code>&gt;&lt;(((.&gt;</code> and <code>&lt;&gt;&lt;</code> swimming the lines, bubbles rising, after the spawn fix.</figcaption></figure>
+</div>
+
+<h2>Verification — and the three things the harnesses (and eyes) caught</h2>
+
+<p>The order this repo insists on: plan pure, probe the paint, then look anyway. 218 unit tests (Conway
+against textbook oscillators, every planner sane at seven seeds, the sprites rectangular);
+<code>ascii-probe</code> extended with a faithfulness oracle per new scene — a snake head <code>@</code>,
+a saucer, a ghost, fish — <span class="good">verdict 25/25 planned / painted / faithful / reaped</span>
+(<a href="probe-output.txt">full output</a>); then every one read as a screenshot.</p>
+
+<ol>
+<li><b>The probe threw twice on a field-name collision.</b> <code>planInvaders</code> returns
+<code>rows</code> as a <i>number</i>, and the probe indexed <code>S.plan.rows.map(...)</code>; the
+<code>life</code> scene carried a numeric <code>rows</code>, and the reveal-timing oracle indexed
+<code>S.rows[0].length</code>. Both threw <span class="bad">"Script failed to execute"</span> with no
+hint which scene. A one-line <code>process.stdout.write(name)</code> localised it to <code>life</code>
+in one run. Fixed by guarding every index with <code>Array.isArray</code> and renaming life's dims to
+<code>lcols/lrows</code> so a number can never sit where an array is expected. <i>A shared field name
+across effects is a collision waiting for the next author.</i></li>
+
+<li><b>quake built an impossible spire.</b> The heap stacked per-origin-column with no ceiling, so a
+column that held forty characters towered — <span class="bad">measured at 394px above the top of the
+screen</span>, 40% of its draws off-frame. The probe flagged it (off-screen &gt; 0, and quake is
+<i>not</i> a motion-exempt effect). Capped the heap at seven rows: past the ceiling, characters pile on
+each other instead of stacking further. <code>above: 0, below: 0</code> at every sample after.</li>
+
+<li><b>the aquarium photographed empty, and only the screenshot knew.</b> Fish spawned up to a full
+screen-width off one edge and swam at ~0.05px/ms — they never reached the tank inside a shot. The probe
+passed it: a fish <i>string</i> drawn off-screen still counts as "own content", and the motion
+exemption forgave the off-screen draws. <b>This is the exact failure this repo keeps re-learning</b> —
+a green oracle over a blank frame — and the fix for it is the same as always: look. Fish now spawn
+spread across the tank.</li>
+</ol>
+
+<p class="meta">Vocabulary: 84 effects (POINT_EFFECTS 57, ASCII_EFFECTS 25, GRID_EFFECTS 17). prompt.js
+and demo.js are baked into the server at startup, so the new names go live on the next
+<code>systemctl restart flourish</code> — the user's command to run, not this session's.</p>
+
+</body></html>

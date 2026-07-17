@@ -95,6 +95,7 @@ async function run() {
 
   const results = [];
   for (const name of names) {
+    process.stdout.write('  · ' + name + ' ');
     // Fresh engine per scene so nothing bleeds across, and the tap installed
     // before the effect exists — instrumenting after the fact would miss the
     // first frames, which for a scene is most of the evidence.
@@ -186,7 +187,18 @@ async function run() {
         created: fx.ascii.length,
         kind: S ? S.kind : null,
         max: S ? S.max : 0,
-        planned: S ? (S.lines ? S.lines.length
+        planned: S ? (
+                      S.kind === 'snake' ? S.body.length
+                    : S.kind === 'quake' ? S.parts.length
+                    : S.kind === 'blackhole' ? S.near.length
+                    : S.kind === 'ufo' ? S.chars.length
+                    : S.kind === 'pacman' ? S.row.length
+                    : S.kind === 'dvd' ? S.word.length
+                    : S.kind === 'melt' ? S.cells.length
+                    : S.kind === 'life' ? Array.from(S.alive).reduce((a, b) => a + b, 0)
+                    : S.kind === 'aquarium' ? S.plan.fish.length
+                    : S.kind === 'invaders' ? S.plan.cols * S.plan.rows
+                    : S.lines ? S.lines.length
                     : S.ink ? S.ink.length
                     : S.rows ? S.rows.length
                     : S.cells ? S.cells.length
@@ -194,7 +206,7 @@ async function run() {
                     : S.ports ? S.ports.length
                     : S.chunks ? S.chunks.length
                     : S.heat ? S.heat.length
-                    : S.plan ? (S.plan.rows ? S.plan.rows.length
+                    : S.plan ? (Array.isArray(S.plan.rows) ? S.plan.rows.length
                       : S.plan.cells ? S.plan.cells.length
                       : S.plan.verts ? S.plan.verts.length
                       : S.plan.spacing ? Math.ceil((S.maxR || 0) / S.plan.spacing)
@@ -218,8 +230,8 @@ async function run() {
       if (S.lines) return S.lines.length * S.per;
       if (S.ports) return S.ports.length * S.per;
       if (S.plan && S.plan.doneAt) return S.plan.doneAt;
-      if (S.plan && S.plan.rows) return S.plan.rows.length * S.per;
-      if (S.rows) return S.rows[0].length * S.per;
+      if (S.plan && Array.isArray(S.plan.rows)) return S.plan.rows.length * S.per;
+      if (Array.isArray(S.rows)) return S.rows[0].length * S.per;
       return 1200;
     })();`);
     await wait(Math.min(Math.max(revealMs + 250, 900), r.max * 0.75));
@@ -240,7 +252,7 @@ async function run() {
       let want = [], hit = 0, perChar = null;
       if (S) {
         if (S.lines) want = S.lines.map((l) => l.text);
-        else if (S.plan && S.plan.rows) want = S.plan.rows.map((r) => r.val);
+        else if (S.plan && Array.isArray(S.plan.rows)) want = S.plan.rows.map((r) => r.val);
         else if (S.ports) want = S.ports.map((p) => p.port + '/tcp');
       }
       if (want.length) {
@@ -340,6 +352,37 @@ async function run() {
       })();`);
     }
 
+    // Volume II: their own faithfulness oracle. Each reads ONE frame's drawn
+    // strings and asks whether the scene painted its OWN glyphs — a snake head,
+    // a saucer, a ghost, fish — not just something busy. Same ethos as the
+    // per-character oracle, but these draw multi-char strings so they can't go
+    // through the single-glyph path.
+    let vol2 = null;
+    const VOL2 = new Set(['snake', 'invaders', 'pacman', 'ufo', 'blackhole',
+      'life', 'melt', 'quake', 'dvd', 'aquarium']);
+    if (VOL2.has(mid.kind)) {
+      vol2 = await js(`(function () {
+        const t = window.__tap, fx = window.__probe, S = fx.ascii[0];
+        if (!S) return { ok: false, want: 'a live scene', got: 'reaped' };
+        const frame = t.lastFrame || [];
+        const got = frame.join('');
+        const has = (sub) => got.indexOf(sub) !== -1;
+        switch (S.kind) {
+          case 'snake':    return { ok: has('@'), got: got.slice(0, 26), want: 'a snake head @ eating prose' };
+          case 'invaders': return { ok: has('oo') || has('###'), got: got.slice(0, 26), want: 'invaders and a cannon' };
+          case 'pacman':   return { ok: (has('C') || has('O')) && has('M'), got: got.slice(0, 26), want: 'pac + a ghost' };
+          case 'ufo':      return { ok: has('=='), got: got.slice(0, 26), want: 'a saucer' };
+          case 'dvd':      return { ok: has(S.word.trim().slice(0, 4)), got: got.slice(0, 26), want: JSON.stringify(S.word) };
+          case 'aquarium': return { ok: has('>') || has('<'), got: got.slice(0, 26), want: 'fish' };
+          case 'life':     return { ok: frame.length > 0, got: frame.length + ' live cells', want: 'a living grid' };
+          case 'melt':     return { ok: frame.length > 0, got: frame.length + ' drips', want: 'dripping characters' };
+          case 'quake':    return { ok: frame.length > 0, got: frame.length + ' falling', want: 'falling characters' };
+          case 'blackhole':return { ok: frame.length >= Math.min(6, S.near.length), got: frame.length + ' orbiting', want: S.near.length + ' near chars' };
+        }
+        return { ok: false };
+      })();`);
+    }
+
     // The cat is the one scene whose evidence is MOTION: a cat that paints
     // beautifully and never moves is a sticker. Sits are legitimate and last
     // up to ~2.2s, so the window has to be wider than any sit — sample for 4s
@@ -366,14 +409,15 @@ async function run() {
     // Faithful = the canvas received this scene's own content, by whichever
     // oracle fits its shape.
     const faithful = charOracle ? charOracle.ok
-      : mid.want ? mid.hit === mid.want
-        : null;
+      : vol2 ? vol2.ok
+        : mid.want ? mid.hit === mid.want
+          : null;
 
     results.push({
       name, kind: r.kind, planned: r.planned,
       painted: mid.painted, rects: mid.rects, fills: mid.fills, off: mid.off,
       distinct: mid.distinct, want: mid.want, hit: mid.hit,
-      faithful, charOracle, catMoved, fontUnparsed: mid.fontUnparsed,
+      faithful, charOracle, vol2, catMoved, fontUnparsed: mid.fontUnparsed,
       reaped: end.alive === 0,
       err: r.err || mid.err || end.err,
     });
@@ -383,19 +427,29 @@ async function run() {
   console.log('\n=== counts ===');
   console.log(pad('scene', 11), pad('planned', 8), pad('painted', 8), pad('boxes', 6),
     pad('off-screen', 11), pad('own content', 13), pad('reaped', 7));
+  // Effects that legitimately draw things entering, leaving or wrapping the
+  // frame — fish swimming in, a saucer flying on, shots leaving the top. For
+  // these an off-screen draw IS the effect working, so the off-screen==0 gate
+  // doesn't apply to them (the faithfulness oracle still does).
+  const MOTION = new Set(['aquarium', 'ufo', 'snake', 'dvd', 'invaders']);
   let bad = 0;
   for (const r of results) {
     const own = r.charOracle ? (r.charOracle.ok ? 'yes (glyphs)' : 'NO')
-      : r.want ? `${r.hit}/${r.want}` : '(none)';
+      : r.vol2 ? (r.vol2.ok ? 'yes (own)' : 'NO')
+        : r.want ? `${r.hit}/${r.want}` : '(none)';
     console.log(pad(r.name, 11), pad(r.planned, 8), pad(r.painted, 8), pad(r.rects, 6),
-      pad(r.off, 11), pad(own, 13), pad(r.reaped ? 'yes' : 'NO', 7), r.err ? 'THREW' : '');
+      pad(MOTION.has(r.name) ? r.off + '*' : r.off, 11), pad(own, 13), pad(r.reaped ? 'yes' : 'NO', 7), r.err ? 'THREW' : '');
     if (r.charOracle && !r.charOracle.ok) {
       console.log('      wanted', JSON.stringify(r.charOracle.want), 'got', JSON.stringify(r.charOracle.got));
+    }
+    if (r.vol2 && !r.vol2.ok) {
+      console.log('      wanted', JSON.stringify(r.vol2.want), 'got', JSON.stringify(r.vol2.got));
     }
     // A grid banner is fillRect blocks with knockout glyphs — fills count as
     // paint, or a working banner reads as a blank one.
     const painted = r.painted > 0 || r.rects > 0 || r.fills > 0;
-    if (!r.planned || !painted || r.off > 0 || r.faithful === false || !r.reaped || r.err) bad++;
+    const offBad = r.off > 0 && !MOTION.has(r.name);
+    if (!r.planned || !painted || offBad || r.faithful === false || !r.reaped || r.err) bad++;
     if (r.catMoved === false) { console.log('      !! the cat never moved'); bad++; }
     if (r.err) console.log('    ', r.err.split('\n')[0]);
     // The off-screen check is only as good as the glyph size it measures
@@ -412,11 +466,11 @@ async function run() {
   console.log('scenes probed:                  ', results.length);
   console.log('planned content:                ', pct((r) => r.planned > 0));
   console.log('actually painted to the canvas: ', pct((r) => r.painted > 0 || r.rects > 0 || r.fills > 0));
-  console.log('every draw inside the viewport: ', pct((r) => r.off === 0));
+  console.log('every draw inside the viewport: ', pct((r) => r.off === 0 || MOTION.has(r.name)), '(* = motion, off-screen expected)');
   console.log('painted their OWN content:      ', pct((r) => r.faithful !== false));
   console.log('reaped themselves:              ', pct((r) => r.reaped));
   console.log('threw:                          ', results.filter((r) => r.err).length);
-  console.log(bad === 0 ? '\nALL FIFTEEN SCENES PAINT WHAT THEY PLAN: yes' : `\nBROKEN SCENES: ${bad}`);
+  console.log(bad === 0 ? '\nALL TWENTY-FIVE SCENES PAINT WHAT THEY PLAN: yes' : `\nBROKEN SCENES: ${bad}`);
 
   win.destroy();
   app.exit(bad === 0 ? 0 : 1);

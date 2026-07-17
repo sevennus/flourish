@@ -55,6 +55,8 @@
     'gibson', 'wardial', 'crack', 'banner', 'sniffer',
     'trace', 'daemon', 'portscan', 'skull', 'overflow',
     'wireframe', 'plasma', 'tunnel', 'firewall', 'cat',
+    'snake', 'invaders', 'pacman', 'ufo', 'blackhole',
+    'life', 'melt', 'quake', 'dvd', 'aquarium',
   ]);
 
   // The grid register: effects that are painted INTO the terminal's own
@@ -71,6 +73,8 @@
   //      regex). A blank shot is a failure someone sees.
   const GRID_EFFECTS = new Set([
     'skull', 'banner', 'wireframe', 'plasma', 'tunnel', 'firewall', 'cat',
+    'snake', 'invaders', 'pacman', 'ufo', 'blackhole',
+    'life', 'melt', 'quake', 'dvd', 'aquarium',
   ]);
 
   // Which directive names are point effects vs. wrapping style spans.
@@ -1523,6 +1527,134 @@
     };
   }
 
+  // ---- the grid register, volume II: ten more, and cheekier ----
+  //
+  // Same contract as everything above it: each fact is a pure seeded plan, so
+  // node --test pins it; the geometry and the incorporation happen in
+  // effects.js against a grid it can't see. Every one of these is built to be
+  // recognisable at a glance and to do something to the prose it lands on.
+
+  // snake — the Nokia snake, slithering the grid and eating the prose one
+  // character at a time. Speed and appetite are the plan; the PATH is emergent
+  // (it seeks the nearest uneaten character at runtime), because a seeded path
+  // over text nobody has typed yet is meaningless.
+  function planSnake(rnd) {
+    const r = rnd || Math.random;
+    return { stepMs: 60 + r() * 26, grow: 2, len0: 5, maxEat: 55, hue: 96 + r() * 46 };
+  }
+
+  // invaders — a formation steps side to side and creeps down, drops the odd
+  // bomb on your prose, and gets shot out of the sky by a cannon that sweeps
+  // the bottom. Cadences and formation size are seeded; the targets are words.
+  const INVADER = { a: ['/oo\\', '<--<'], b: ['/oo\\', '>-->'] };
+  const CANNON = ['/^\\', '###'];
+  function planInvaders(rnd) {
+    const r = rnd || Math.random;
+    return {
+      cols: 6 + ((r() * 3) | 0), rows: 3 + ((r() * 2) | 0),
+      stepMs: 300 + r() * 150, dropEvery: 6, bombP: 0.9, shotMs: 460 + r() * 220,
+    };
+  }
+
+  // pacman — waka-waka along a line, the characters ahead are pellets and go
+  // dark as they're eaten, a ghost gives chase. Cheeky and iconic.
+  function planPacman(rnd) {
+    const r = rnd || Math.random;
+    return { speed: 0.10 + r() * 0.05, chompMs: 140, ghostGap: 6, ghostHue: (r() * 360) | 0 };
+  }
+
+  // ufo — a saucer drifts in, parks over a word, and tractor-beams it clean off
+  // the line. The word floats back down when the saucer leaves; no abduction
+  // here is permanent.
+  const SAUCER = [' .==. ', '(====)'];
+  function planUfo(rnd) {
+    const r = rnd || Math.random;
+    return { drift: 0.05 + r() * 0.03, hover: 1500, dir: r() < 0.5 ? -1 : 1 };
+  }
+
+  // blackhole — a singularity opens in the prose and the nearby characters
+  // spiral in and stretch toward it, then fall back out when it closes.
+  function planBlackhole(rnd) {
+    const r = rnd || Math.random;
+    return { radius: 200 + r() * 90, spin: 0.0018 + r() * 0.001, pull: 1600, hue: (r() * 360) | 0 };
+  }
+
+  // life — Conway's Game of Life, seeded from the INK of whatever is on screen:
+  // every character is a live cell and you watch your own words breed and die.
+  function planLife(rnd) {
+    const r = rnd || Math.random;
+    return { stepMs: 150 + r() * 80, gens: 44, hue: 128 + r() * 90 };
+  }
+
+  // The Conway step, pure so a test can pin a blinker and a block. Flat
+  // row-major 0/1 grids; edges are dead (no wrap), which is fine for a
+  // screenful of text that reaches the borders anyway.
+  function stepLife(alive, cols, rows) {
+    const next = new Uint8Array(cols * rows);
+    for (let rr = 0; rr < rows; rr++) {
+      for (let cc = 0; cc < cols; cc++) {
+        let n = 0;
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (!dr && !dc) continue;
+            const a = rr + dr, b = cc + dc;
+            if (a < 0 || b < 0 || a >= rows || b >= cols) continue;
+            n += alive[a * cols + b] ? 1 : 0;
+          }
+        }
+        const live = alive[rr * cols + cc];
+        next[rr * cols + cc] = ((live && (n === 2 || n === 3)) || (!live && n === 3)) ? 1 : 0;
+      }
+    }
+    return next;
+  }
+
+  // melt — the whole screen turns to wax: every column of characters sags and
+  // drips downward at its own pace, pooling at the bottom, then eases back home
+  // at the end. The drips are canvas; the real text never moves.
+  function planMelt(rnd) {
+    const r = rnd || Math.random;
+    return { speed: 0.05 + r() * 0.03, stagger: 1100, hold: 900 };
+  }
+
+  // quake — the ground shakes, the characters rattle off their lines, fall into
+  // a heap at the bottom, then spring back home. Cheeky property damage;
+  // everything is put back.
+  function planQuake(rnd) {
+    const r = rnd || Math.random;
+    return { grav: 0.0024 + r() * 0.001, fallSpread: 700, home: 2400, jitter: 3 };
+  }
+
+  // dvd — the screensaver dream: a word lifted off the screen bounces around as
+  // a logo, and if it ever hits a corner exactly, the crowd goes wild.
+  function planDvd(rnd) {
+    const r = rnd || Math.random;
+    const ang = (0.28 + r() * 0.44) * Math.PI;
+    return {
+      vx: Math.cos(ang) * (r() < 0.5 ? 1 : -1),
+      vy: Math.sin(ang) * (r() < 0.5 ? 1 : -1),
+      speed: 0.10 + r() * 0.05, hue: (r() * 360) | 0,
+    };
+  }
+
+  // aquarium — the terminal floods and the prose becomes the reef: ascii fish
+  // swim the lines, bubbles rise, and nobody gets any work done.
+  function planAquarium(rnd) {
+    const r = rnd || Math.random;
+    const n = 4 + ((r() * 4) | 0);
+    const fish = [];
+    for (let i = 0; i < n; i++) {
+      fish.push({
+        yF: 0.12 + r() * 0.74,
+        speed: (0.03 + r() * 0.05) * (r() < 0.5 ? -1 : 1),
+        phase: r() * Math.PI * 2,
+        hue: (r() * 360) | 0,
+        big: r() < 0.35,
+      });
+    }
+    return { fish, bubbleP: 0.06 };
+  }
+
   return {
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
     MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS,
@@ -1543,5 +1675,7 @@
     planPlasma, plasmaField, planTunnel,
     FIREWALL_MAX_HEAT, FIREWALL_RAMP, stepFirewall, planFirewall,
     CAT_W, CAT_FRAMES, mirrorCatFrame, planCat,
+    planSnake, INVADER, CANNON, planInvaders, planPacman, SAUCER, planUfo,
+    planBlackhole, planLife, stepLife, planMelt, planQuake, planDvd, planAquarium,
   };
 });

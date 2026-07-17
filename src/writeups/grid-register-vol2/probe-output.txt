@@ -1,0 +1,38 @@
+=== counts ===
+scene       planned  painted  boxes  off-screen  own content   reaped 
+gibson      39       60422    3354   0           yes (glyphs)  yes     
+wardial     17       1191     0      0           17/17         yes     
+crack       6        863      0      0           yes (glyphs)  yes     
+banner      123      0        0      0           yes (glyphs)  yes     
+sniffer     7        437      0      0           7/7           yes     
+trace       9        894      0      0           9/9           yes     
+daemon      15       1294     0      0           15/15         yes     
+portscan    32       2847     0      0           32/32         yes     
+skull       80       4823     0      0           yes (glyphs)  yes     
+overflow    6        896      0      0           6/6           yes     
+wireframe   6        12701    0      0           yes (glyphs)  yes     
+plasma      173      44564    0      0           yes (glyphs)  yes     
+tunnel      13       67485    0      0           yes (glyphs)  yes     
+firewall    1500     95276    0      0           yes (glyphs)  yes     
+cat         1        1081     0      0           yes (glyphs)  yes     
+snake       5        1128     0      0*          yes (own)     yes     
+invaders    32       6030     0      0*          yes (own)     yes     
+pacman      34       138      0      0           yes (own)     yes     
+ufo         3        176      0      2*          yes (own)     yes     
+blackhole   144      12816    0      0           yes (own)     yes     
+life        721      20809    0      0           yes (own)     yes     
+melt        721      36141    0      0           yes (own)     yes     
+quake       721      47453    0      0           yes (own)     yes     
+dvd         8        87       0      0*          yes (own)     yes     
+aquarium    7        775      0      596*        yes (own)     yes     
+
+=== verdict ===
+scenes probed:                   25
+planned content:                 25/25
+actually painted to the canvas:  25/25
+every draw inside the viewport:  25/25 (* = motion, off-screen expected)
+painted their OWN content:       25/25
+reaped themselves:               25/25
+threw:                           0
+
+ALL TWENTY-FIVE SCENES PAINT WHAT THEY PLAN: yes
