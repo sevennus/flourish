@@ -1,0 +1,125 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish: lightning never reached the bottom, and three separate caps agreed it shouldn't</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  ul li{margin:5px 0}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+  .back{display:inline-block;margin-bottom:18px;color:#94a3b8;text-decoration:none;font-size:13px}
+  .back:hover{color:#e0b54a}
+</style></head><body>
+<a class="back" href="../index.html">&larr; back to writeups</a>
+
+<h1>Flourish: lightning never reached the bottom, and three separate caps agreed it shouldn't</h1>
+<p class="meta">Branch <code>main</code> · <code>src/renderer.js</code>, <code>src/flourish.js</code>, <code>src/effects.js</code> · found with <code>tools/lightning-probe.js</code> · 2026-07-16</p>
+
+<h2>The symptom</h2>
+<p>Jim fired twenty lightnings at a screen full of text and said:</p>
+<blockquote>"lightning didnt read the bottom"</blockquote>
+<p>Then, when I started reading code instead of measuring:</p>
+<blockquote>"make it reach every single line of text on the screen"</blockquote>
+<p>He was right, and the effect was worse than "didn't reach the bottom" — it could not reach it. Not on that page, not on any page. The bolts land in a band near the top and the rest of the transcript is unreachable by construction.</p>
+
+<h2>How I found it</h2>
+<p>The standing rule in this repo is that reading this code is how you get fooled — <code>apophenia</code> shipped broken while I read its call chain three times and found nothing wrong with it. So the first move was <code>tools/lightning-probe.js</code>, which streams a real reply through the real renderer and dumps what <code>fire()</code> is actually handed. One run answered it:</p>
+<pre>=== what fire() received ===
+anchors: 4
+  "that" at 903,155
+  "and"  at 312,178
+  "had"  at 239,223
+  "small" at 492,245
+<span class="bad">y spread: 90 px across the page</span>
+
+=== verdict ===
+words struck: <span class="bad">3</span>
+words set on fire: <span class="bad">3</span></pre>
+<p><b>90px of spread on a 700px window.</b> Every bolt inside <code>y=155..245</code>. And note the second tell, printed for weeks without anyone reading it as a bug: <code>anchors: 4</code> but <code>words struck: 3</code>. The engine was throwing one of the four away.</p>
+
+<h2>The root cause: three caps, stacked, all biased upward</h2>
+<p>Nothing here was broken. Three separate, individually reasonable limits multiplied into an effect that could only paint the top of the page.</p>
+<table>
+<tr><th>#</th><th>Cap</th><th>Where</th><th>What it actually did</th></tr>
+<tr><td>1</td><td><code>CANDIDATES = 90</code></td><td><code>renderer.js</code></td><td>A ceiling on how far back the walk goes, and the walk starts at the <b>tail</b>. 90 in-viewport words is the bottom nine or ten lines of a tall screen — the top of the page is not merely unpicked, it is <b>never measured</b>.</td></tr>
+<tr><td>2</td><td><code>strikeTargets(4)</code></td><td><code>renderer.js</code></td><td>The decisive one. See below.</td></tr>
+<tr><td>3</td><td><code>anchors.slice(0, 2 + rand(0..2))</code></td><td><code>effects.js</code></td><td>The engine then kept <b>2–4</b> of what survived, taken off the <b>front</b> of a list that arrives sorted top-to-bottom. This is the <code>4 anchors → 3 bolts</code> in the probe output.</td></tr>
+</table>
+
+<p>The middle one is the interesting failure, because the code involved is <em>the fix for the last bug</em>. <code>stratifyAnchors</code> was written to cure apophenia's collinear sampling: bucket the candidates by visual line, then round-robin one word per line per pass. It does that correctly. But look at the exit condition:</p>
+<pre>const buckets = [...rows.keys()].<span class="warn">sort((a, b) =&gt; a - b)</span>.map((k) =&gt; rows.get(k));
+...
+for (let pass = 0; out.length &lt; max; pass++) {
+  for (const b of buckets) {
+    if (b.length &lt;= pass) continue;
+    out.push(b[pass]); took++;
+    <span class="bad">if (out.length &gt;= max) break;</span>   // &lt;- returns before pass 0 finishes
+  }
+}</pre>
+<p>Buckets are sorted <b>ascending in y</b> — top of screen first. Pass 0 walks them in that order and returns the instant it has <code>max</code>. So:</p>
+<p style="text-align:center"><b><code>max</code> smaller than the number of lines ⇒ "the first <code>max</code> lines", forever.</b></p>
+<p>With <code>max=4</code> that is the top four lines of the pool, whatever is below them, on every fire. This was invisible for as long as apophenia (<code>max=14</code>) was the only caller, because fourteen lines is most of a screen and the bias has nothing left to hide. <b>lightning was the first caller to ask for a small number, and a small number is precisely where a "spread" function becomes a "take from the top" function.</b></p>
+
+<figure class="two">
+  <div><img src="before-t0450.png" alt="Before: three small ember clusters near the top of the page, bottom two-thirds untouched">
+  <figcaption><b class="bad">Before</b> — <code>t=450ms</code>. Three ember clusters, all in a band near the top. The bolts have already decayed. The bottom two-thirds of the page has no bolt, no fire, and never could.</figcaption></div>
+  <div><img src="after-t0450.png" alt="After: bolts across the full width striking words on every line of the reply">
+  <figcaption><b class="good">After</b> — <code>t=450ms</code>, same probe, same reply, same frame. One bolt per line of text, full width, top to bottom. The grey <code>claude</code> label at y=135 is deliberately untouched.</figcaption></div>
+</figure>
+
+<h2>A fourth thing, found only because the pool got bigger</h2>
+<p>Raising <code>CANDIDATES</code> to 600 immediately produced anchors on <code>"Demo"</code> and <code>"claude"</code> — the demo-mode notice and the <b>speaker label</b> at the head of every line. Those are furniture, not prose, and <code>igniteWord</code> would have handed <code>burn</code> a UI element and turned the word <code>claude</code> to ash on every strike. The old 90-word cap had been hiding this by never walking far enough back to reach it. The walk now rejects anything inside <code>.who</code>:</p>
+<pre>const walk = document.createTreeWalker(transcript, NodeFilter.SHOW_TEXT, {
+  acceptNode: (n) =&gt; (n.parentElement &amp;&amp; n.parentElement.closest('.who'))
+    ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+});</pre>
+<p>The anchor count dropping from 10 to 9 on the same reply is the filter's own proof.</p>
+
+<h2>The options, and how it was decided</h2>
+<p>The <code>strikeTargets(4)</code> call carried a comment explaining itself: <em>"every one of these is a bolt, and a screen full of bolts is weather, not a strike."</em> That was a real design position, and the fix overrides it. Jim's instruction settled it in one line — <b>"make it reach every single line of text on the screen"</b> — so: he wants the weather. Worth recording that the old comment was never actually delivering its own intent anyway; <code>4</code> did not mean "four bolts, tastefully spread". It meant "the top four lines and a 90px band", which is not a design, it's an accident with a rationale attached.</p>
+
+<h2>The fix</h2>
+<ul>
+<li><code>flourish.js</code> — <code>lineKey(y)</code> extracted so bucketing and counting cannot drift apart, plus <code>lineCount(cand)</code>. <code>stratifyAnchors(cand, lineCount(cand))</code> is exactly one anchor per line: pass 0 takes one from every bucket and fills <code>max</code> precisely as it runs out.</li>
+<li><code>renderer.js</code> — <code>wordCandidates()</code> split out of <code>wordAnchors()</code>; new <code>lineAnchors()</code> asks for every line <b>by name</b> rather than guessing a constant; <code>CANDIDATES</code> 90 → 600 so the pool can physically hold a full screen; <code>.who</code> excluded from the walk.</li>
+<li><code>effects.js</code> — the <code>slice</code> is gone; every anchor becomes a bolt. The stagger is rescaled to a fixed <b>380ms window</b> (<code>spread = 380 / (n-1)</code>) instead of <code>k * rand(60,190)</code>, which at one bolt per line would have dealt the last bolt of a 30-line screen a 4-second delay — a drizzle down the page, each bolt alone on screen, every earlier one already expired.</li>
+<li><code>stratifyAnchors</code> keeps its top-bias, documented in its header as a <b>property</b> rather than a bug, with the instruction that a caller wanting the whole screen must ask for <code>lineCount(cand)</code>.</li>
+</ul>
+
+<h2>Verification</h2>
+<p>Same probe, same reply, same frame times; only the code differs.</p>
+<table>
+<tr><th></th><th>before</th><th>after</th></tr>
+<tr><td>anchors handed to <code>fire()</code></td><td class="bad">4</td><td class="good">9</td></tr>
+<tr><td>bolts created</td><td class="bad">3</td><td class="good">9</td></tr>
+<tr><td>words struck</td><td class="bad">3</td><td class="good">9</td></tr>
+<tr><td>words set on fire</td><td class="bad">3</td><td class="good">9</td></tr>
+<tr><td><b>y spread</b></td><td class="bad">90 px</td><td class="good">286 px</td></tr>
+<tr><td>all bolts landed by</td><td>—</td><td class="good">711 ms</td></tr>
+</table>
+<p>9 rather than 10 because the <code>.who</code> filter correctly drops the <code>claude</code> label. On a full-height transcript (18 lines of text, 700px window) the same run gives <b>18 anchors, 18 bolts, 18 struck, 18 alight, y spread 511px</b>, all landed by 823ms — i.e. it scales with the page rather than with a constant.</p>
+
+<figure class="two">
+  <div><img src="before-t2800.png" alt="Before aftermath: three ashed words near the top">
+  <figcaption><b class="bad">Before</b> — <code>t=2800ms</code>. Three ashed words, all in the top band.</figcaption></div>
+  <div><img src="after-t2800.png" alt="After aftermath: one ashed word per line, top to bottom, prose fully readable">
+  <figcaption><b class="good">After</b> — <code>t=2800ms</code>. <b>One ashed word per line, every line</b>, and the prose entirely readable underneath. This is the clearest single proof that every line was reached.</figcaption></div>
+</figure>
+
+<p><code>npm test</code> 206/206 and <code>npm run smoke:web</code> both green — but per this repo's own rules, neither is the evidence. The evidence is the probe dump and the four frames above. <code>npm test</code> covers pure modules only and has passed 88/88 on a fatally broken app; the screenshots are here because <b>counts cannot see composition</b>, which is the lesson the ASCII scenes left behind two commits ago.</p>
+
+<h2>What this one adds to the pile</h2>
+<p>This is the fifth time in this repo that the thing standing in front of the bug was something built to prevent the previous bug. <code>stratifyAnchors</code> exists <em>because</em> apophenia sampled collinearly; it fixed that completely and carried a new bias out the other side, one that only expresses itself for callers it didn't have yet.</p>
+<p>The generalisable form: <b>a function that takes a <code>max</code> and a set it must sample from has a policy for "max is smaller than the set", and that policy is almost never written down.</b> Here the policy was "take from the front", the front was sorted by y, and so the honest name for <code>stratifyAnchors(cand, 4)</code> was never "four spread anchors" — it was "the top four lines". Ask for what you want by name (<code>lineCount(cand)</code>) rather than by a number that happens to be close to it.</p>
+<p>And the probe printed <code>anchors: 4 / struck: 3</code> the whole time. It was right there, in the output, and it read as a rounding detail rather than as a third cap. <b>A discrepancy between what you hand a function and what it does is never a detail.</b></p>
+
+</body></html>
+</content>
+</invoke>

@@ -683,11 +683,34 @@
   // vertical spread is the thing this effect cannot do without.
   //
   // `rnd` is injectable so a test can pin the choice.
+  //
+  // ⚠ `max` SMALLER than the number of lines is a top-of-screen bias, not a
+  // spread. Pass 0 walks the buckets in y order and returns the instant it has
+  // `max`, so it hands back the FIRST `max` lines and never looks lower. That
+  // was invisible while apophenia (max=14) was the only caller — fourteen lines
+  // is most of a screen — and it was the whole of lightning's "doesn't reach
+  // the bottom": max=4 meant the top four lines, forever, whatever was below.
+  // A caller that wants the whole screen must ask for lineCount(cand).
+  // Which visual line a word's centre sits on. One definition, because
+  // stratifyAnchors buckets by it and lineCount counts those buckets — two
+  // independent "same line, give or take" rounds would drift and lineCount
+  // would ask for a number of lines that doesn't exist.
+  const lineKey = (y) => Math.round(y / 6);
+
+  // How many distinct lines these candidates cover. `stratifyAnchors(cand,
+  // lineCount(cand))` is exactly one anchor per line, top to bottom: pass 0
+  // takes one from every bucket and fills `max` precisely as it runs out.
+  function lineCount(cand) {
+    const rows = new Set();
+    for (const c of cand || []) rows.add(lineKey(c.y));
+    return rows.size;
+  }
+
   function stratifyAnchors(cand, max, rnd) {
     const random = rnd || Math.random;
     const rows = new Map();
     for (const c of cand) {
-      const key = Math.round(c.y / 6);   // same visual line, give or take
+      const key = lineKey(c.y);
       if (!rows.has(key)) rows.set(key, []);
       rows.get(key).push(c);
     }
@@ -1237,7 +1260,7 @@
     CONFAB_PAIRS, planConfab, overwriteShift, mutableMask,
     plausibleDirective, MAX_DIRECTIVE_LEN,
     BOLT_FALLOFF, boltPath, measurePath, forkPaths, leaderStair, revealAt,
-    ANCHOR_MIN_SPREAD, MIN_SLOPE, anchorsFlat, stratifyAnchors,
+    ANCHOR_MIN_SPREAD, MIN_SLOPE, anchorsFlat, stratifyAnchors, lineCount,
     pairShallow, planApopheniaPairs,
     ASCII_EFFECTS, BANNER_5x7, BANNER_H, BANNER_WORDS, bannerRows, SKULL,
     SNIFFER_PAYLOADS, TRACE_HOPS, PORT_SVC, CRACK_WORDS, CRACK_CHARSET,

@@ -566,9 +566,20 @@
       // in via o.anchors â the same channel apophenia used, and the reason its
       // geometry outlived it. With nothing on screen to hit, strike the caret,
       // which is where every effect fires by default anyway.
-      const targets = (o.anchors && o.anchors.length)
-        ? o.anchors.slice(0, 2 + ((Math.random() * 3) | 0))
-        : [{ x, y }];
+      // EVERY anchor the renderer hands over, which is now one per line of text
+      // on screen. This used to slice(0, 2 + rand(0..2)) — a third cap stacked
+      // under two others, taking 2-4 off the FRONT of a list that arrives
+      // sorted top-to-bottom. Between the three of them a "screen full of
+      // lightning" was three bolts inside a 90px band, and the probe printed
+      // `anchors: 4 / bolts: 3` for weeks without anyone reading it as a bug.
+      const targets = (o.anchors && o.anchors.length) ? o.anchors : [{ x, y }];
+
+      // The stagger has to fit a fixed window rather than accumulate per bolt.
+      // At the old 3 bolts, k * rand(60,190) was a ~400ms storm; at one bolt
+      // per line it would deal the last bolt of a 30-line screen a 4-second
+      // delay, by which point every early bolt has expired — a slow drizzle
+      // down the page instead of a strike, and each one alone on screen.
+      const spread = 380 / Math.max(1, targets.length - 1);
 
       targets.forEach((t, k) => {
         // Origins spread across the top so parallel bolts don't read as one
@@ -583,7 +594,7 @@
           target: t, index: t.index,
           onStrike: o.onStrike || null,
           struck: false,
-          grow, delay: k * rand(60, 190),
+          grow, delay: k * spread * rand(0.6, 1.4),
           life: 0, max: grow + 520,
           color: c,
         });

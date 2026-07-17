@@ -37,6 +37,17 @@ borrowing SimJim's.</p>
 
 <h2>Writeups</h2>
 
+<a class="card" href="lightning-never-reached-the-bottom/index.html">
+  <div class="t">lightning never reached the bottom, and three separate caps agreed it shouldn't</div>
+  <div class="d">2026-07-16 · <code>renderer.js</code>, <code>flourish.js</code>, <code>effects.js</code>, <code>tools/lightning-probe.js</code></div>
+  <div class="h">"lightning didnt read the bottom" — and it couldn't, on any page. Three reasonable
+  limits stacked into 90px of spread on a 700px screen. The decisive one is <b>the fix for the
+  last bug</b>: <code>stratifyAnchors</code> cured apophenia's collinear sampling and carried a
+  top-of-screen bias out the other side, because <code>max</code> below the line count silently
+  means "the top <code>max</code> lines". Invisible while apophenia (<code>max=14</code>) was its
+  only caller. The probe had been printing <code>anchors: 4 / struck: 3</code> for weeks.</div>
+</a>
+
 <a class="card" href="ascii-scenes-plan-vs-paint/index.html">
   <div class="t">Ten ASCII scenes, and three things a green suite couldn't see</div>
   <div class="d">2026-07-16 · <code>flourish.js</code>, <code>effects.js</code>, <code>prompt.js</code>, <code>tools/ascii-probe.js</code>, <code>test/ascii.test.js</code></div>

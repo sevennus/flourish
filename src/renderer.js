@@ -329,11 +329,25 @@
   // collinear every single time and apophenia drew a rule through the prose
   // instead of a web. It was never once visible. The candidate pool has to be
   // several times `max` for there to be anything to stratify over.
-  const CANDIDATES = 90;
+  // 90 was sized for apophenia, which wants a web off a dozen-odd lines and
+  // does not care what it misses. It is a CEILING ON HOW FAR BACK THE WALK
+  // GOES, and the walk starts at the tail — so 90 in-viewport words is the
+  // bottom nine or ten lines of a tall screen and the top of the page is not
+  // merely unpicked, it is never measured. lightning wants every line, so the
+  // pool has to be able to hold every line: ~1100px of transcript at ~22px a
+  // line and ~11 words a line is comfortably under 600.
+  const CANDIDATES = 600;
 
-  function wordAnchors(max) {
+  function wordCandidates() {
     const cand = [];
-    const walk = document.createTreeWalker(transcript, NodeFilter.SHOW_TEXT);
+    // Prose only. `.who` is the speaker label at the head of every line, and it
+    // is furniture — a bolt that strikes it hands igniteWord a UI element and
+    // burns "claude" to ash. It was never reachable while the pool stopped 90
+    // words back from the tail; at 600 it is the first thing the walk finds.
+    const walk = document.createTreeWalker(transcript, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement && n.parentElement.closest('.who'))
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
     const nodes = [];
     while (walk.nextNode()) nodes.push(walk.currentNode);
     const range = document.createRange();
@@ -360,9 +374,22 @@
         });
       }
     }
-    const picked = window.Flourish.stratifyAnchors(cand, max);
-    picked.forEach((p, k) => { p.index = k; });
-    return picked;
+    return cand;
+  }
+
+  const number = (picked) => { picked.forEach((p, k) => { p.index = k; }); return picked; };
+
+  function wordAnchors(max) {
+    return number(window.Flourish.stratifyAnchors(wordCandidates(), max));
+  }
+
+  // One anchor on every line of text currently on screen — what lightning
+  // wants, asked for by name. Passing a guessed constant is what put the bolts
+  // in a 90px band at the top of a 700px page: any `max` below the line count
+  // silently means "the top `max` lines" (see stratifyAnchors' header).
+  function lineAnchors() {
+    const cand = wordCandidates();
+    return number(window.Flourish.stratifyAnchors(cand, window.Flourish.lineCount(cand)));
   }
 
   /*
@@ -521,6 +548,7 @@
   // ignite nothing, and a harness that assembles the two halves itself is a
   // harness that can assemble them wrong while still producing a picture.
   const strikeTargets = (n) => prepareStrikes(wordAnchors(n));
+  const lineStrikeTargets = () => prepareStrikes(lineAnchors());
 
   // Exposed for the shot harnesses, which have to fire the word-anchored
   // effects the way applyEvents does. Firing them bare is precisely why a
@@ -528,7 +556,9 @@
   // fx-shots photographed the branch nobody was looking at. A bare lightning
   // would fail the same way: one bolt at the caret, nothing on fire.
   window.Flourish.wordAnchors = wordAnchors;
+  window.Flourish.lineAnchors = lineAnchors;
   window.Flourish.strikeTargets = strikeTargets;
+  window.Flourish.lineStrikeTargets = lineStrikeTargets;
   window.Flourish.igniteWord = igniteWord;
   window.Flourish.letterSources = letterSources;
   window.Flourish.letterAt = letterAt;
@@ -572,9 +602,11 @@
         const o = parseArgs(ev.args);
         if (ev.name === 'apophenia') o.anchors = wordAnchors(14);
         if (ev.name === 'lightning') {
-          // Fewer than apophenia wanted: every one of these is a bolt, and a
-          // screen full of bolts is weather, not a strike.
-          const anchors = strikeTargets(4);
+          // Every line on screen gets one. This used to ask for 4 on the theory
+          // that "a screen full of bolts is weather, not a strike" — Jim wants
+          // the weather, and 4 never meant 4 anyway: it meant the top four
+          // lines and a 90px band on a 700px page.
+          const anchors = lineStrikeTargets();
           o.anchors = anchors;
           o.onStrike = (i) => igniteWord(anchors[i]);
         }
