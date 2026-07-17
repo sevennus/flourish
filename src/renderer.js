@@ -779,9 +779,128 @@
     idle.kick();
   }
 
+  // ---------- slash commands: /model and /effort ----------
+  /*
+   * CLI parity, which is the whole point of this terminal: `claude` takes
+   * --model and --effort, so the box that drives it should too. `/model` with
+   * no argument opens a picker; `/model opus` sets it outright.
+   *
+   * The vocabulary is the CLI's own, read off `claude --help` rather than
+   * remembered:
+   *   --effort  low | medium | high | xhigh | max
+   *   --model   an alias ('fable', 'opus', 'sonnet') or a full name
+   *
+   * ⚠ The menu offers ALIASES, not pinned IDs. An alias always resolves to the
+   * latest model in its family, so `opus` keeps working the day 4.9 ships;
+   * a hard-coded `claude-opus-4-8` in this file would quietly rot instead. A
+   * full name still works — it just goes through the argument form, not here.
+   */
+  const SLASH = {
+    model: {
+      title: 'Model',
+      options: [
+        { v: '',       label: 'default', hint: 'let Claude Code choose' },
+        { v: 'opus',   label: 'opus',    hint: 'Claude Opus 4.8 — the default Opus tier' },
+        { v: 'sonnet', label: 'sonnet',  hint: 'Claude Sonnet 5 — faster, near-Opus on coding' },
+        { v: 'haiku',  label: 'haiku',   hint: 'Claude Haiku 4.5 — fastest, cheapest' },
+        { v: 'fable',  label: 'fable',   hint: 'Claude Fable 5 — most capable, priciest' },
+      ],
+    },
+    effort: {
+      title: 'Effort',
+      options: [
+        { v: '',       label: 'default', hint: "Claude Code's own default (xhigh)" },
+        { v: 'low',    label: 'low',     hint: 'short, scoped, latency-sensitive work' },
+        { v: 'medium', label: 'medium',  hint: 'cost-saving step down from the default' },
+        { v: 'high',   label: 'high',    hint: 'balances tokens against intelligence' },
+        { v: 'xhigh',  label: 'xhigh',   hint: 'best for coding and agentic work' },
+        { v: 'max',    label: 'max',     hint: 'the ceiling; can overthink' },
+      ],
+    },
+  };
+
+  const slashMenu = el('slash-menu');
+  let slashOpen = null;   // { key, idx } while a picker is up
+
+  const shown = (v) => v || 'default';
+
+  // Persist one field without disturbing the rest. saveConfig replaces the
+  // whole config, so this spreads the live cfg rather than sending one key.
+  async function applySlash(key, v) {
+    cfg = await api.saveConfig({ ...cfg, [key]: v });
+    plainLine('system', `${key} → ${shown(cfg[key])}`);
+    idle.kick();
+  }
+
+  function closeSlash() {
+    slashOpen = null;
+    slashMenu.classList.add('hidden');
+    slashMenu.replaceChildren();
+  }
+
+  function paintSlash() {
+    if (!slashOpen) return;
+    const spec = SLASH[slashOpen.key];
+    const cur = cfg[slashOpen.key] || '';
+    slashMenu.replaceChildren(...spec.options.map((o, i) => {
+      const row = document.createElement('div');
+      row.className = 'slash-opt' + (i === slashOpen.idx ? ' on' : '') + (o.v === cur ? ' current' : '');
+      row.setAttribute('role', 'option');
+      const name = document.createElement('span');
+      name.className = 'slash-name';
+      name.textContent = o.label;
+      const hint = document.createElement('span');
+      hint.className = 'slash-hint';
+      hint.textContent = o.hint;
+      row.append(name, hint);
+      // Pick on mousedown, not click: the input keeps focus, and click would
+      // land after the blur that closes the menu.
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const key = slashOpen.key;
+        closeSlash();
+        applySlash(key, o.v);
+      });
+      slashOpen && (row.dataset.v = o.v);
+      return row;
+    }));
+    slashMenu.classList.remove('hidden');
+  }
+
+  function openSlash(key) {
+    const spec = SLASH[key];
+    const cur = cfg[key] || '';
+    const at = spec.options.findIndex((o) => o.v === cur);
+    slashOpen = { key, idx: at < 0 ? 0 : at };
+    paintSlash();
+  }
+
+  // Returns true if the text was a slash command and has been handled.
+  function handleSlash(t) {
+    const m = /^\/(\w+)\s*(.*)$/.exec(t);
+    if (!m) return false;
+    const key = m[1].toLowerCase();
+    const spec = SLASH[key];
+    if (!spec) return false;   // not ours — let it go to Claude Code as a prompt
+    const arg = m[2].trim();
+    if (!arg) { openSlash(key); return true; }
+    // An explicit argument skips the picker. Anything the CLI would accept is
+    // fair game (a full model name, a pinned snapshot) — the menu is a
+    // shortcut, not an allowlist. Effort is the exception: it has five legal
+    // values and a typo would be rejected minutes later, by the CLI, as a
+    // failed run.
+    if (key === 'effort' && !spec.options.some((o) => o.v === arg)) {
+      plainLine('system', `effort must be one of: ${spec.options.slice(1).map((o) => o.v).join(', ')}`);
+      return true;
+    }
+    applySlash(key, arg);
+    return true;
+  }
+
   function sendMessage(text) {
     const t = text.trim();
     if (!t) return;
+    if (handleSlash(t)) return;
     // Mid-reply: queue it rather than swallow it. Showing the line immediately
     // (dimmed) is the point — a keystroke that vanishes reads as a broken box,
     // which is how this whole mess started.
@@ -829,6 +948,37 @@
   }
 
   input.addEventListener('input', () => idle.kick());
+
+  // Arrow / Enter / Esc while a picker is open. Bound on the INPUT and in the
+  // capture phase so it runs before the document-level Esc handler below —
+  // otherwise dismissing a menu would also interrupt whatever is streaming,
+  // which is a genuinely bad surprise for a keypress that means "never mind".
+  input.addEventListener('keydown', (e) => {
+    if (!slashOpen) return;
+    const spec = SLASH[slashOpen.key];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const d = e.key === 'ArrowDown' ? 1 : -1;
+      slashOpen.idx = (slashOpen.idx + d + spec.options.length) % spec.options.length;
+      paintSlash();
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      const { key } = slashOpen;
+      const v = spec.options[slashOpen.idx].v;
+      closeSlash();
+      input.value = '';
+      applySlash(key, v);
+      e.preventDefault();
+      e.stopPropagation();   // don't also submit the form
+    } else if (e.key === 'Escape') {
+      closeSlash();
+      e.preventDefault();
+      e.stopPropagation();   // don't also interrupt the run
+    }
+  }, true);
+
+  // Typing again after the menu opened means you're writing a prompt, not
+  // picking — get the menu out of the way rather than leaving it floating.
+  input.addEventListener('input', () => { if (slashOpen) closeSlash(); });
 
   // Esc anywhere: stop the run, or clear the queue if nothing is running.
   document.addEventListener('keydown', (e) => {
@@ -944,6 +1094,12 @@
       password: el('cfg-password').value,
       cwd: el('cfg-cwd').value.trim(),
       model: el('cfg-model').value.trim(),
+      // ⚠ CARRIED, NOT READ FROM THE FORM. saveConfig replaces the whole
+      // config with whatever this returns, so any field without a settings
+      // input is silently dropped by an unrelated Settings → Save. `effort`
+      // is set from /effort and has no input here; without this line, opening
+      // settings and saving would quietly reset it to default.
+      effort: cfg.effort || '',
       bypass: el('cfg-bypass').checked,
       demoMode: el('cfg-demo').checked,
       devUrl: el('cfg-devurl').value.trim(),

@@ -77,6 +77,7 @@ function buildInner(userText, cfg, sessionId) {
   inner.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages');
   inner.push('--append-system-prompt', shq(FLOURISH_SYSTEM_PROMPT));
   if (cfg.model && cfg.model.trim()) inner.push('--model', shq(cfg.model.trim()));
+  if (cfg.effort && cfg.effort.trim()) inner.push('--effort', shq(cfg.effort.trim()));
   if (sessionId) inner.push('--resume', shq(sessionId));
   if (cfg.bypass !== false) inner.push('--permission-mode', 'bypassPermissions');
   inner.push('< /dev/null');
@@ -99,6 +100,7 @@ function buildArgs(userText, cfg, sessionId) {
   a.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages');
   a.push('--append-system-prompt', FLOURISH_SYSTEM_PROMPT);
   if (cfg.model && cfg.model.trim()) a.push('--model', cfg.model.trim());
+  if (cfg.effort && cfg.effort.trim()) a.push('--effort', cfg.effort.trim());
   if (sessionId) a.push('--resume', sessionId);
   if (cfg.bypass !== false) a.push('--permission-mode', 'bypassPermissions');
   return a;

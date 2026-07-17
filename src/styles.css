@@ -145,6 +145,25 @@ body {
 ::-webkit-scrollbar-thumb { background: #1b2a22; border-radius: 6px; }
 
 /* ---- input row ---- */
+/* Slash-command picker (/model, /effort). Sits directly on top of the
+   composer and shares its border so the two read as one control. */
+#slash-menu {
+  border-top: 1px solid var(--line); background: var(--bg-soft);
+  padding: 6px 0; max-height: 42vh; overflow-y: auto;
+}
+#slash-menu.hidden { display: none; }
+.slash-opt {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 5px 16px; cursor: pointer; font-family: var(--mono); font-size: 13px;
+}
+.slash-name { color: var(--fg); min-width: 8ch; }
+.slash-hint { color: var(--fg-dim); font-size: 12px; }
+/* The selected row, and the one already in effect. `current` marks what you'd
+   get by pressing Esc — worth seeing before you change it. */
+.slash-opt.on { background: rgba(53, 240, 160, 0.10); }
+.slash-opt.on .slash-name { color: var(--accent); text-shadow: 0 0 8px var(--accent); }
+.slash-opt.current .slash-name::after { content: " ·"; color: var(--accent-2); }
+
 #input-row {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg-soft);

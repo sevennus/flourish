@@ -110,11 +110,17 @@ test('both transports pass the same claude flags (they drift the moment you touc
       .map((m) => m[1]).sort();
   const flagsInArgv = (a) => a.filter((x) => /^--[a-z-]+$/.test(x)).sort();
 
+  // ⚠ THIS LIST IS THE TEST'S TEETH. A flag only guarded by `if (cfg.x)` is
+  // never emitted by EITHER transport unless some cfg here sets `x` — so the
+  // two agree trivially (both emit nothing) and a one-sided addition passes.
+  // The drift this test exists to catch is invisible for any option the
+  // permutations don't exercise. Add a row when you add an option.
   for (const cfg of [
     { ...base },
     { ...base, bypass: false },
     { ...base, model: 'claude-opus-4-8' },
-    { ...base, cwd: '/var/www/simjim', model: 'claude-opus-4-8' },
+    { ...base, effort: 'xhigh' },
+    { ...base, cwd: '/var/www/simjim', model: 'claude-opus-4-8', effort: 'max' },
   ]) {
     for (const sess of [null, 'sess-abc']) {
       assert.deepStrictEqual(

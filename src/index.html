@@ -38,6 +38,10 @@
       <div id="transcript"></div>
     </main>
 
+    <!-- Slash-command picker. Sits above the composer and is populated by the
+         renderer; empty and hidden until /model or /effort opens it. -->
+    <div id="slash-menu" class="hidden" role="listbox" aria-label="Options"></div>
+
     <form id="input-row" autocomplete="off">
       <span class="prompt-sigil">&gt;</span>
       <input id="input" type="text" spellcheck="false"
