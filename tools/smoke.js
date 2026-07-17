@@ -125,11 +125,17 @@ async function main() {
     const requestId = 'smoke-1';
     win.webContents.send('session:auto', { requestId, userText: 'show me the effects' });
 
-    // Stream the showcase the way main.js's streamDemo does.
+    // Stream the showcase the way the real server does — ~14ms per 6-char
+    // chunk (server.js: 14 + rand(22)). This is NOT cosmetic: at the old 4ms
+    // the whole reel arrived in a ~6s firehose, so every scene in it was alive
+    // at once — a ~50-deep pile of ASCII scenes that software GL (xvfb) can't
+    // draw, stalling the typewriter past the deadline. The real app never does
+    // that; it paces the stream so the scenes spread out. Match the app, and
+    // the pile never forms.
     const chunks = SHOWCASE.match(/.{1,6}/gs) || [];
     for (const c of chunks) {
       win.webContents.send('chat:delta', { requestId, text: c });
-      await new Promise((r) => setTimeout(r, 4));
+      await new Promise((r) => setTimeout(r, 14));
     }
     win.webContents.send('chat:done', { requestId });
   }
@@ -142,7 +148,15 @@ async function main() {
   // when it DID work, it was asserting the very thing Jim was complaining
   // about — "input re-enabled after the reply" passed green for days while the
   // box was dead for the entire reply, which is what he actually meant.
-  const deadline = Date.now() + (WEB ? 45000 : 25000);
+  // Patience scales with the reply. The showcase is a long reel now (every
+  // effect, fired more than once), and at ~14ms/chunk it takes tens of seconds
+  // just to stream, before the typewriter drains it. A fixed 25s deadline was
+  // calibrated for the old one-pass tour; budget from the actual streamed
+  // length instead (~14ms per 6 chars streamed, plus a floor and headroom for
+  // the drain) so a longer demo gets proportionally longer to land — without
+  // going mute if the reply genuinely hangs.
+  const streamMs = SHOWCASE.length / 6 * 14;
+  const deadline = Date.now() + Math.max(WEB ? 45000 : 25000, streamMs + 30000);
   let ready = false;
   while (Date.now() < deadline) {
     ready = await win.webContents.executeJavaScript(
