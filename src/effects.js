@@ -136,6 +136,8 @@
     wardial: A.planWardial, sniffer: A.planSniffer, trace: A.planTrace,
     daemon: A.planDaemon, portscan: A.planPortscan, overflow: A.planOverflow,
     crack: A.planCrack, gibson: A.planGibson,
+    skull: A.planSkull, wireframe: A.planWireframe, plasma: A.planPlasma,
+    tunnel: A.planTunnel, firewall: A.planFirewall, cat: A.planCat,
   };
 
   // The terminal's own stack, so a scene sits in the same face as the prose
@@ -1128,6 +1130,62 @@
     // literally. The content is planned in flourish.js (pure, seeded, tested);
     // what lives here is geometry and paint.
 
+    // ---- the grid register: helpers ----
+    //
+    // Grid scenes draw in the transcript's OWN face and cells (o.grid, measured
+    // by the renderer), so their glyphs land exactly on top of the DOM's. Two
+    // coordinate rules keep the registration honest:
+    //
+    //   * A REAL character is painted at its measured position (cell.x/cell.y)
+    //     — never at where the uniform grid thinks its row should be, because
+    //     the 10px paragraph margins make those drift apart down the page.
+    //   * The vertical offset from a run's rect-top to its canvas BASELINE is
+    //     computed once per font, from the measured rect height — not guessed
+    //     from the px size, which is how a canvas glyph ends up sitting 2px
+    //     proud of the DOM glyph it claims to replace.
+
+    _gridFont(G) { return G.px + 'px ' + G.font; }
+
+    // rect-top -> alphabetic-baseline offset for the grid's font. The DOM
+    // centres the font box in the line box (half-leading above and below), so
+    // the baseline sits at half the spare height plus the font's ascent.
+    _vOff(G) {
+      const key = G.px + '|' + G.font + '|' + (G.rh || 0);
+      this._voffs = this._voffs || new Map();
+      let v = this._voffs.get(key);
+      if (v == null) {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.font = this._gridFont(G);
+        const m = ctx.measureText('Mg');
+        const asc = (m.fontBoundingBoxAscent != null) ? m.fontBoundingBoxAscent : G.px * 0.8;
+        const desc = (m.fontBoundingBoxDescent != null) ? m.fontBoundingBoxDescent : G.px * 0.25;
+        ctx.restore();
+        v = Math.max(0, ((G.rh || G.lineH) - (asc + desc)) / 2) + asc;
+        this._voffs.set(key, v);
+      }
+      return v;
+    }
+
+    // The page background as "r,g,b", for veils and knockouts. G.bg arrives as
+    // a computed "rgb(...)" string; anything unparseable gets the terminal's
+    // own near-black rather than a crash.
+    _bgRgb(G) {
+      const m = /(\d+)\D+(\d+)\D+(\d+)/.exec((G && G.bg) || '');
+      return m ? (m[1] + ',' + m[2] + ',' + m[3]) : '5,7,10';
+    }
+
+    // The shared fields every grid scene carries: its snapshot, its baseline
+    // offset, and how far the text has scrolled since it was measured.
+    _gridExtra(o) {
+      return {
+        grid: o.grid,
+        vOff: this._vOff(o.grid),
+        scrollY: o.scrollY || null,
+        scroll0: o.scrollY ? o.scrollY() : 0,
+      };
+    }
+
     // Cell metrics for a monospace grid at `px`. Measured, never assumed.
     _cell(px) {
       const ctx = this.ctx;
@@ -1180,18 +1238,37 @@
 
     // A line-reveal pane: wardial, sniffer, trace, daemon, overflow all share
     // this shape â lines arriving one at a time, scrolling once they overflow.
+    // Snap a pane's origin onto the text's rows and columns, so its output
+    // sits IN the terminal's grid rather than floating over it at its own
+    // size. The pane keeps working bare — these are pre-dating effects with a
+    // real no-grid path — but with a grid it wears the page's own face.
+    _snapPane(box, G) {
+      box.x = G.left + Math.round((box.x - G.left) / G.cellW) * G.cellW;
+      box.y = G.top + Math.round((box.y - G.top) / G.lineH) * G.lineH;
+      return box;
+    }
+
+    _paneExtra(o) {
+      return o.grid
+        ? Object.assign(this._gridExtra(o), { font: o.grid.font })
+        : {};
+    }
+
     _linePane(kind, x, y, o, lines, opts) {
       if (!lines || !lines.length) return null;
-      const cell = this._cell(Math.round(13 * o.scale));
+      const G = o.grid;
+      const cell = G ? { w: G.cellW, h: G.lineH, px: G.px }
+        : this._cell(Math.round(13 * o.scale));
       const cols = lines.reduce((m, l) => Math.max(m, l.text.length), 0);
       const rows = Math.min(opts.rows || 16, lines.length);
       const box = this._pane(x, y, cols + 2, rows + 2, cell);
-      return this._scene(kind, o, {
+      if (G) this._snapPane(box, G);
+      return this._scene(kind, o, Object.assign(this._paneExtra(o), {
         lines, cell, box, rows,
         per: opts.per || 110,
         title: opts.title || '',
         max: opts.max || (lines.length * (opts.per || 110) + 1500),
-      });
+      }));
     }
 
     // The Gibson. A wireframe city pulled toward the viewer, its towers built
@@ -1240,25 +1317,31 @@
     _overflow(x, y, o) {
       const plan = ASCII_PLAN.overflow && ASCII_PLAN.overflow();
       if (!plan) return;
-      const cell = this._cell(Math.round(13 * o.scale));
+      const G = o.grid;
+      const cell = G ? { w: G.cellW, h: G.lineH, px: G.px }
+        : this._cell(Math.round(13 * o.scale));
       const box = this._pane(x, y, 40, plan.rows.length + 5, cell);
-      this._scene('overflow', o, {
+      if (G) this._snapPane(box, G);
+      this._scene('overflow', o, Object.assign(this._paneExtra(o), {
         plan, cell, box, per: 260,
         max: plan.rows.length * 260 + 2200,
-      });
+      }));
     }
 
     _portscan(x, y, o) {
       const ports = ASCII_PLAN.portscan && ASCII_PLAN.portscan();
       if (!ports) return;
-      const cell = this._cell(Math.round(12 * o.scale));
-      const perRow = 4;
+      const G = o.grid;
+      const cell = G ? { w: G.cellW, h: G.lineH, px: G.px }
+        : this._cell(Math.round(12 * o.scale));
+      const perRow = G ? Math.max(1, Math.min(4, ((G.cols - 2) / 21) | 0)) : 4;
       const rows = Math.ceil(ports.length / perRow);
       const box = this._pane(x, y, perRow * 21, rows + 2, cell);
-      this._scene('portscan', o, {
+      if (G) this._snapPane(box, G);
+      this._scene('portscan', o, Object.assign(this._paneExtra(o), {
         ports, cell, box, perRow, per: 70,
         max: ports.length * 70 + 2000,
-      });
+      }));
     }
 
     _crack(x, y, o) {
@@ -1274,11 +1357,37 @@
 
     // Big block letters. `bannerRows` rasterises the phrase; each ink cell
     // lights on its own schedule so the words assemble left to right.
+    //
+    // With a grid, the banner is laid INTO the text's cells: each ink cell is
+    // a solid block exactly one character wide and one line tall, and wherever
+    // a block lands on a real character, that character is knocked out of it
+    // in page-black — the prose shows through the letters as letterforms. A
+    // phrase too wide for the screen's columns keeps the floating path.
     _banner(x, y, o) {
       if (!A.bannerRows || !A.BANNER_WORDS) return;
       const text = pick(A.BANNER_WORDS);
       const rows = A.bannerRows(text);
       if (!rows || !rows.length) return;
+      const G = o.grid;
+      if (G && rows[0].length <= G.cols - 2) {
+        const c0 = Math.round((G.cols - rows[0].length) / 2);
+        const r0 = Math.round(Math.min(Math.max((y - G.top) / G.lineH - rows.length / 2, 0.5),
+          G.rows - rows.length - 1));
+        const ink = [];
+        for (let r = 0; r < rows.length; r++) {
+          for (let c = 0; c < rows[r].length; c++) {
+            if (rows[r][c] !== '#') continue;
+            ink.push({ r, c, src: G.cells.get((r0 + r) * 4096 + (c0 + c)) || null });
+          }
+        }
+        const max = rand(2900, 3500);
+        this._scene('banner', o, Object.assign(this._gridExtra(o), {
+          ink, rows, text, c0, r0,
+          per: (max * 0.32) / rows[0].length,
+          max,
+        }));
+        return;
+      }
       // Cell height is the font size here, not the 1.42 line-height _cell()
       // gives text: a banner's rows have to ABUT. At normal leading the blocks
       // sit in stripes with the background showing through and the letters read
@@ -1303,28 +1412,234 @@
       void x;
     }
 
-    // The skull rezzes in scattered, not in reading order: it's an image, and
-    // an image that assembles left-to-right reads as text.
+    // The skull, ON the grid. It rezzes scattered, not in reading order (an
+    // image that assembles left-to-right reads as text) — and each cell rezzes
+    // out of whatever the page already says there: the real character under it
+    // lights up first, then locks into the art. Then the jaw talks.
+    //
+    // No grid, no skull. The old floating version at its own font size is
+    // exactly the "line art hanging in the window" this register replaced, and
+    // a silent fallback to it would photograph well — the one failure shape
+    // this repo cannot afford twice.
     _skull(x, y, o) {
-      if (!A.SKULL || !A.SKULL.length) return;
-      const art = A.SKULL;
-      const cell = this._cell(Math.round(17 * o.scale));
-      const cells = [];
-      for (let r = 0; r < art.length; r++) {
-        for (let c = 0; c < art[r].length; c++) {
-          const ch = art[r][c];
-          if (ch === ' ') continue;
-          cells.push({ ch, r, c, at: rand(0, 900) });
+      const G = o.grid;
+      if (!G || !ASCII_PLAN.skull) return;
+      const plan = ASCII_PLAN.skull();
+      if (!plan) return;
+      const c0 = Math.round(Math.min(Math.max((x - G.left) / G.cellW - plan.w / 2, 1),
+        G.cols - plan.w - 1));
+      const r0 = Math.round(Math.min(Math.max((y - G.top) / G.lineH - plan.h / 2, 0.5),
+        G.rows - plan.h - 2.5));
+      // Marry each art cell to the character really under it, once, now —
+      // offsets into a scrolling transcript go stale, measured pixels don't.
+      for (const cell of plan.cells) {
+        cell.src = G.cells.get((r0 + cell.r) * 4096 + (c0 + cell.c)) || null;
+      }
+      this._scene('skull', o, Object.assign(this._gridExtra(o), {
+        plan, c0, r0, lastDrop: 0,
+        max: 3600,
+      }));
+    }
+
+    // A wireframe solid — sphere, prism or cube — tumbling through the prose,
+    // rasterised into the text's cells. Its strokes are slope glyphs where the
+    // page is empty; where an edge crosses a real character, that character
+    // lights up instead. The rotation is what sells it: letters catch the
+    // wireframe and let it go as it turns.
+    _wireframe(x, y, o) {
+      const G = o.grid;
+      if (!G || !ASCII_PLAN.wireframe) return;
+      const shape = (o.words || []).filter(
+        (w) => (A.WIREFRAME_SHAPES || []).indexOf(w) !== -1)[0] || null;
+      const plan = ASCII_PLAN.wireframe(shape);
+      if (!plan) return;
+      const R = Math.min(G.h, G.w) * 0.30 * Math.min(o.scale, 1.4);
+      this._scene('wireframe', o, Object.assign(this._gridExtra(o), {
+        plan, R,
+        cx: Math.min(Math.max(x, G.left + R + 30), G.left + G.w - R - 30),
+        cy: Math.min(Math.max(y, G.top + R + 30), G.top + G.h - R - 30),
+        max: rand(3800, 4600),
+      }));
+    }
+
+    // Plasma: the demo-scene colour field, with the transcript as its raster.
+    // Every word on screen becomes pixels of it — repainted in place, in the
+    // page's own font, in the field's colour — and the empty cells between
+    // get a faint glyph ramp so the shapes read even in the margins.
+    _plasma(x, y, o) {
+      const G = o.grid;
+      if (!G || !ASCII_PLAN.plasma) return;
+      const plan = ASCII_PLAN.plasma();
+      if (!plan || !G.runs.length) return;
+      // Chunk long runs so colour can vary along a line — per-word colour is
+      // the cost compromise: one fillText per chunk instead of per character
+      // keeps a full screen of prose near gibson's measured frame budget.
+      const chunks = [];
+      for (const run of G.runs) {
+        for (let i = 0; i < run.text.length; i += 7) {
+          chunks.push({ x: run.x + i * G.cellW, y: run.y, text: run.text.slice(i, i + 7) });
         }
       }
-      if (!cells.length) return;
-      this._scene('skull', o, {
-        cells, cell,
-        x0: this.w / 2 - (art[0].length * cell.w) / 2,
-        y0: y - (art.length * cell.h) / 2,
-        max: rand(2800, 3400),
+      const dots = [];
+      const cstep = Math.max(3, Math.ceil((G.rows * G.cols) / 4200));
+      for (let r = 0; r < G.rows; r++) {
+        for (let c = (r % 2) * (cstep >> 1); c < G.cols; c += cstep) {
+          if (!G.cells.has(r * 4096 + c)) dots.push({ c, r });
+        }
+      }
+      this._scene('plasma', o, Object.assign(this._gridExtra(o), {
+        plan, chunks, dots, palArr: o.pal,
+        max: 3600,
+      }));
+      void x; void y;
+    }
+
+    // Concentric rings of slope glyphs rushing outward from the caret — a
+    // tunnel bored through the page. Rings recolour the characters they pass
+    // over; the grid is the tunnel wall.
+    _tunnel(x, y, o) {
+      const G = o.grid;
+      if (!G || !ASCII_PLAN.tunnel) return;
+      const plan = ASCII_PLAN.tunnel();
+      if (!plan) return;
+      const cx = Math.min(Math.max(x, G.left + 60), G.left + G.w - 60);
+      const cy = Math.min(Math.max(y, G.top + 60), G.top + G.h - 60);
+      const dx = Math.max(cx - G.left, G.left + G.w - cx);
+      const dyc = Math.max(cy - G.top, G.top + G.h - cy);
+      this._scene('tunnel', o, Object.assign(this._gridExtra(o), {
+        plan, cx, cy, palArr: o.pal,
+        maxR: Math.sqrt(dx * dx + dyc * dyc),
+        max: 3400,
+      }));
+    }
+
+    // Doom fire, built of characters, climbing from the bottom edge: the
+    // firewall, literally. The heat field is the classic cellular automaton
+    // (stepFirewall, pure and tested); the draw maps heat to a glyph ramp and
+    // an ember gradient. Prose standing in the fire is painted as its own
+    // characters gone hot — fuel, not casualty: the DOM text underneath is
+    // untouched and walks out unburnt when the scene fades.
+    _firewall(x, y, o) {
+      const G = o.grid;
+      if (!G || !ASCII_PLAN.firewall) return;
+      const plan = ASCII_PLAN.firewall();
+      if (!plan) return;
+      const cols = Math.min(G.cols + 2, 220);
+      this._scene('firewall', o, {
+        // Deliberately NOT _gridExtra: the firewall is pinned to the viewport
+        // bottom, not to the text — a wall doesn't scroll away with the prose.
+        grid: G, vOff: this._vOff(G),
+        heat: new Array(cols * plan.rows).fill(0),
+        cols, frows: plan.rows, acc: 0, stepMs: plan.stepMs,
+        palArr: o.pal,
+        max: 3200,
       });
-      void x;
+      void x; void y;
+    }
+
+    // The cat. Pops out of the prose near the caret, walks the lines of text
+    // like ledges, drops to lower lines, sits, blinks, wanders off. Platforms
+    // are the renderer's measured line segments; o.platforms is a closure so
+    // the cat can re-measure as the transcript grows under it.
+    _cat(x, y, o) {
+      if (!o.platforms || !ASCII_PLAN.cat || !A.CAT_FRAMES) return;
+      const G = o.grid;
+      if (!G) return;
+      const plan = ASCII_PLAN.cat();
+      const plats = o.platforms();
+      const minW = A.CAT_W * G.cellW * 1.6;
+      let best = null, bd = Infinity;
+      for (const p of plats) {
+        if (p.x1 - p.x0 < minW) continue;
+        const d = Math.abs(p.y - y) + Math.abs((p.x0 + p.x1) / 2 - x) * 0.1;
+        if (d < bd) { bd = d; best = p; }
+      }
+      if (!best) return;
+      const w = A.CAT_FRAMES.walkA[0].length * G.cellW;
+      const cx = Math.min(Math.max(x - w / 2, best.x0), best.x1 - w);
+      const mirror = {};
+      for (const k in A.CAT_FRAMES) mirror[k] = A.mirrorCatFrame(A.CAT_FRAMES[k]);
+      const pal = o.pal || PALETTES.gold;   // a cat is a tabby unless told otherwise
+      const S = this._scene('cat', o, Object.assign(this._gridExtra(o), {
+        plan, plats, getPlats: o.platforms, plat: best,
+        x: cx, y: best.y, vy: 0,
+        st: 'pop', stT: 0, dir: plan.dir,
+        frames: A.CAT_FRAMES, mirrorFrames: mirror,
+        refresh: 700,
+        pal,
+        color: _rgb(pal[1] || pal[0]),
+        accent: _rgb(pal[3] || pal[0]),
+        max: plan.life,
+      }));
+      // It pops OUT of the text: a puff of dust where it surfaces.
+      if (S) this.emit(cx + w / 2, best.y, { n: 10, colors: S.pal, spread: 2.4 });
+    }
+
+    // The cat's whole day: a small platformer AI, run from _update so it gets
+    // real dt. States: pop -> walk <-> sit -> fall -> land -> walk, and every
+    // transition is driven by the measured geometry of the prose.
+    _updateCat(S, dt) {
+      S.stT += dt;
+      S.refresh -= dt;
+      const drift = S.scrollY ? (S.scrollY() - S.scroll0) : 0;
+      const G = S.grid;
+      const w = S.frames.walkA[0].length * G.cellW;
+      const feet = () => S.x + w / 2;
+      if (S.refresh <= 0 && S.getPlats) {
+        S.refresh = 700;
+        // Re-measured platforms arrive in NOW-coordinates; the cat lives in
+        // snapshot coordinates (the draw shifts everything by the scroll
+        // delta), so shift them back into its frame.
+        S.plats = S.getPlats().map((p) => ({ x0: p.x0, x1: p.x1, y: p.y + drift }));
+        let again = null, ad = 8;
+        for (const p of S.plats) {
+          const d = Math.abs(p.y - S.y);
+          if (d < ad && feet() >= p.x0 - 6 && feet() <= p.x1 + 6) { ad = d; again = p; }
+        }
+        if (again) S.plat = again;
+      }
+      const below = () => {
+        for (const p of S.plats) {
+          if (p.y > S.y + 4 && p.y < S.y + G.lineH * 14
+            && feet() >= p.x0 - 4 && feet() <= p.x1 + 4) return p;
+        }
+        return null;
+      };
+      if (S.st === 'pop') {
+        if (S.stT > 340) { S.st = 'walk'; S.stT = 0; }
+      } else if (S.st === 'walk') {
+        S.x += S.dir * S.plan.speed * dt;
+        if (Math.random() < S.plan.sitP * dt) { S.st = 'sit'; S.stT = 0; S.sitFor = 900 + rand(0, 1300); }
+        const past = S.dir < 0 ? feet() < S.plat.x0 : feet() > S.plat.x1;
+        if (past) {
+          if (below()) { S.st = 'fall'; S.stT = 0; S.vy = 0; }
+          else if (feet() < G.left - 30 || feet() > G.left + G.w + 30) { S.life = S.max; }
+          else { S.dir = -S.dir; }   // no ground below: think better of it
+        }
+      } else if (S.st === 'sit') {
+        if (S.stT > S.sitFor) {
+          if (Math.random() < S.plan.turnP) S.dir = -S.dir;
+          S.st = 'walk'; S.stT = 0;
+        }
+      } else if (S.st === 'fall') {
+        S.vy += 0.0035 * dt;
+        const ny = S.y + S.vy * dt;
+        let hit = null;
+        for (const p of S.plats) {
+          if (p.y >= S.y - 1 && p.y <= ny && feet() >= p.x0 - 4 && feet() <= p.x1 + 4) {
+            if (!hit || p.y < hit.y) hit = p;
+          }
+        }
+        if (hit) {
+          S.y = hit.y; S.plat = hit; S.vy = 0; S.st = 'land'; S.stT = 0;
+          this.emit(feet(), S.y - drift, { n: 6, colors: S.pal, spread: 1.6 });
+        } else {
+          S.y = ny;
+          if (S.y - drift > G.top + G.h + G.lineH * 2) S.life = S.max;
+        }
+      } else if (S.st === 'land') {
+        if (S.stT > 220) { S.st = 'walk'; S.stT = 0; }
+      }
     }
 
     _drawAscii(ctx, S) {
@@ -1335,6 +1650,12 @@
       if (fade <= 0) return;
       ctx.save();
       ctx.textBaseline = 'top';
+      // Scenes that live on the text ride WITH the text. Their coordinates are
+      // viewport coordinates from snapshot time; the transcript has kept
+      // scrolling since (same aliasing salvage pays for), so shift the whole
+      // scene by how far it moved. Scenes without scrollY — the viewport-pinned
+      // ones — get zero.
+      if (S.scrollY) ctx.translate(0, S.scroll0 - S.scrollY());
 
       if (S.kind === 'gibson') {
         // A plain pinhole projection: screen = focal * ground / z. The horizon
@@ -1412,6 +1733,27 @@
         if (S.life >= P.doneAt) {
           this._fillText(ctx, '** ACCESS GRANTED **', x0, S.cy + C.h * 1.4, S.accent, fade);
         }
+      } else if (S.kind === 'banner' && S.ink) {
+        // On the grid: each ink cell is a solid block one character wide, one
+        // line tall — and where a block landed on a real character, that
+        // character is knocked out of it in page-black, so the prose shows
+        // through the letters.
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        for (const cell of S.ink) {
+          if (S.life < cell.c * S.per) continue;
+          const pop = Math.min(1, (S.life - cell.c * S.per) / 180);
+          const col = cell.r < 2 ? S.accent : S.color;
+          ctx.fillStyle = 'rgba(' + col + ',' + fade * (0.30 + pop * 0.58) + ')';
+          ctx.fillRect(G.left + (S.c0 + cell.c) * G.cellW,
+            G.top + (S.r0 + cell.r) * G.lineH, G.cellW + 0.5, G.lineH + 0.5);
+          if (cell.src) {
+            this._fillText(ctx, cell.src.ch, cell.src.x, cell.src.y + S.vOff,
+              bg, fade * 0.92);
+          }
+        }
       } else if (S.kind === 'banner') {
         const C = S.cell;
         ctx.font = C.px + 'px ' + MONO;
@@ -1426,33 +1768,66 @@
           }
         }
       } else if (S.kind === 'skull') {
-        const C = S.cell;
-        ctx.font = C.px + 'px ' + MONO;
-        for (const cell of S.cells) {
+        const G = S.grid, P = S.plan;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const drop = A.jawDropAt ? A.jawDropAt(S.life, P.chomps) : 0;
+        // The veil: make room on the page without erasing it. It fades with
+        // the scene, and the prose underneath walks out untouched.
+        const bg = this._bgRgb(G);
+        const pad = G.cellW * 2;
+        ctx.fillStyle = 'rgba(' + bg + ',' + fade * 0.82 + ')';
+        ctx.beginPath();
+        ctx.roundRect(G.left + S.c0 * G.cellW - pad, G.top + S.r0 * G.lineH - pad * 0.6,
+          P.w * G.cellW + pad * 2, (P.h + P.drop) * G.lineH + pad * 1.2, 10);
+        ctx.fill();
+        for (const cell of P.cells) {
           if (S.life < cell.at) continue;
-          const pop = Math.min(1, (S.life - cell.at) / 260);
-          this._fillText(ctx, cell.ch, S.x0 + cell.c * C.w, S.y0 + cell.r * C.h,
-            S.color, fade * pop * 0.95);
+          const gx = G.left + (S.c0 + cell.c) * G.cellW;
+          const gy = G.top + (S.r0 + cell.r) * G.lineH
+            + (cell.jaw ? drop * G.lineH : 0) + S.vOff;
+          if (S.life < cell.lockAt) {
+            // Rezzing: the character that was REALLY there lights up in place
+            // — the skull assembles out of the page — and bare ground spins
+            // junk until it locks.
+            if (cell.src) {
+              this._fillText(ctx, cell.src.ch, cell.src.x, cell.src.y + S.vOff,
+                S.accent, fade * 0.9);
+            } else {
+              this._fillText(ctx, CRACK_CHARSET[(Math.random() * CRACK_CHARSET.length) | 0],
+                gx, gy, S.dim, fade * 0.55);
+            }
+          } else {
+            const pop = Math.min(1, (S.life - cell.lockAt) / 180);
+            let a = fade * (0.45 + 0.55 * pop);
+            let col = S.color;
+            if (cell.eye) { col = S.accent; a *= 0.72 + 0.28 * Math.sin(S.life / 130); }
+            this._fillText(ctx, cell.ch, gx, gy, col, a);
+          }
         }
       } else if (S.kind === 'portscan') {
         const C = S.cell;
-        ctx.font = C.px + 'px ' + MONO;
-        this._fillText(ctx, 'PORT     STATE     SERVICE', S.box.x, S.box.y - C.h, S.dim, fade * 0.7);
+        const yo = S.font ? S.vOff : 0;
+        if (S.font) ctx.textBaseline = 'alphabetic';
+        ctx.font = C.px + 'px ' + (S.font || MONO);
+        this._fillText(ctx, 'PORT     STATE     SERVICE', S.box.x, S.box.y - C.h + yo, S.dim, fade * 0.7);
         for (let i = 0; i < S.ports.length; i++) {
           if (S.life < i * S.per) continue;
           const p = S.ports[i];
           const col = i % S.perRow, row = (i / S.perRow) | 0;
           const open = p.state === 'open';
           const txt = (p.port + '/tcp').padEnd(11) + p.state.padEnd(9) + p.svc;
-          this._fillText(ctx, txt, S.box.x + col * C.w * 21, S.box.y + row * C.h,
+          this._fillText(ctx, txt, S.box.x + col * C.w * 21, S.box.y + row * C.h + yo,
             open ? S.color : S.dim, fade * (open ? 1 : 0.42));
         }
       } else if (S.kind === 'overflow') {
         const C = S.cell, P = S.plan;
-        ctx.font = C.px + 'px ' + MONO;
+        const yo = S.font ? S.vOff : 0;
+        if (S.font) ctx.textBaseline = 'alphabetic';
+        ctx.font = C.px + 'px ' + (S.font || MONO);
         const filled = Math.min(P.flood, Math.floor(S.life / S.per));
         const bar = '+' + '-'.repeat(34) + '+';
-        this._fillText(ctx, bar, S.box.x, S.box.y, S.dim, fade * 0.7);
+        this._fillText(ctx, bar, S.box.x, S.box.y + yo, S.dim, fade * 0.7);
         for (let i = 0; i < P.rows.length; i++) {
           const r = P.rows[i];
           // Filled bottom-up: the last row in the list floods first.
@@ -1460,27 +1835,233 @@
           const val = smashed ? P.smashed : r.val;
           const txt = '| ' + r.label + ' ' + ('0x' + (r.addr >>> 0).toString(16)) + '  ' + val + ' |';
           const isRet = r.kind === 'ret';
-          this._fillText(ctx, txt, S.box.x, S.box.y + (i + 1) * C.h,
+          this._fillText(ctx, txt, S.box.x, S.box.y + (i + 1) * C.h + yo,
             smashed ? (isRet ? S.accent : S.color) : S.dim,
             fade * (smashed ? 1 : 0.5));
         }
-        this._fillText(ctx, bar, S.box.x, S.box.y + (P.rows.length + 1) * C.h, S.dim, fade * 0.7);
+        this._fillText(ctx, bar, S.box.x, S.box.y + (P.rows.length + 1) * C.h + yo, S.dim, fade * 0.7);
         if (filled >= P.flood) {
           this._fillText(ctx, 'eip = ' + P.smashed + '  -> ' + 'AAAA'.repeat(2),
-            S.box.x, S.box.y + (P.rows.length + 2.4) * C.h, S.accent, fade);
+            S.box.x, S.box.y + (P.rows.length + 2.4) * C.h + yo, S.accent, fade);
+        }
+      } else if (S.kind === 'wireframe') {
+        const G = S.grid, P = S.plan;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const ramp = Math.min(1, S.life / 260);
+        // Three rotations, unrolled: tilt about z (fixed, from the plan), then
+        // the two live tumbles about y and x. Projection is a plain pinhole —
+        // the same one gibson uses — with +z toward the viewer.
+        const a1 = S.life * P.rateA, a2 = S.life * P.rateB;
+        const cT = Math.cos(P.tilt), sT = Math.sin(P.tilt);
+        const cA = Math.cos(a1), sA = Math.sin(a1);
+        const cB = Math.cos(a2), sB = Math.sin(a2);
+        const F = 3;
+        const pts = P.verts.map((v) => {
+          const x1 = v[0] * cT - v[1] * sT, y1 = v[0] * sT + v[1] * cT, z1 = v[2];
+          const x2 = x1 * cA + z1 * sA, z2 = -x1 * sA + z1 * cA;
+          const y3 = y1 * cB - z2 * sB, z3 = y1 * sB + z2 * cB;
+          const k = F / (F - z3);
+          return { x: S.cx + x2 * S.R * k, y: S.cy + y3 * S.R * k, z: z3 };
+        });
+        const seen = new Set();
+        for (const e of P.edges) {
+          const p0 = pts[e[0]], p1 = pts[e[1]];
+          const glyph = A.slopeGlyph(p1.x - p0.x, p1.y - p0.y);
+          const aa = fade * ramp * (0.30 + 0.55 * ((p0.z + p1.z) / 2 + 1) / 2);
+          const cells = A.rasterCells(
+            (p0.x - G.left) / G.cellW, (p0.y - G.top) / G.lineH,
+            (p1.x - G.left) / G.cellW, (p1.y - G.top) / G.lineH);
+          for (const cc of cells) {
+            if (cc.c < 0 || cc.r < 0 || cc.c >= G.cols || cc.r >= G.rows) continue;
+            const key = cc.r * 4096 + cc.c;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const real = G.cells.get(key);
+            // The incorporation rule: a stroke crossing a real character
+            // lights THAT character up — the prose catches the wireframe and
+            // lets it go as it turns.
+            if (real) {
+              this._fillText(ctx, real.ch, real.x, real.y + S.vOff,
+                S.accent, Math.min(1, aa + 0.25));
+            } else {
+              this._fillText(ctx, glyph, G.left + cc.c * G.cellW,
+                G.top + cc.r * G.lineH + S.vOff, S.color, aa);
+            }
+          }
+        }
+        // Joints, bright — but only on solids with corners. A sphere's rings
+        // are smooth; dotting their sample points reads as measles.
+        if (P.kind !== 'sphere') {
+          for (const p of pts) {
+            const cc = Math.round((p.x - G.left) / G.cellW);
+            const rr = Math.round((p.y - G.top) / G.lineH);
+            if (cc < 0 || rr < 0 || cc >= G.cols || rr >= G.rows) continue;
+            this._fillText(ctx, 'o', G.left + cc * G.cellW,
+              G.top + rr * G.lineH + S.vOff,
+              S.accent, fade * ramp * (0.5 + 0.5 * (p.z + 1) / 2));
+          }
+        }
+      } else if (S.kind === 'plasma') {
+        const G = S.grid, P = S.plan;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const inout = Math.min(1, S.life / 380, Math.max(0, (S.max - S.life) / 420));
+        if (inout <= 0) { ctx.restore(); return; }
+        const tt = S.life * P.speed;
+        const bg = this._bgRgb(G);
+        const rh = G.rh || G.lineH;
+        // The prose is the raster: every chunk of it repainted in place, in
+        // the field's colour, over a knockout of the page background so the
+        // recolour replaces the character instead of doubling it.
+        for (const chk of S.chunks) {
+          const v = A.plasmaField(chk.x, chk.y, tt, P);
+          ctx.fillStyle = 'rgba(' + bg + ',' + inout * 0.9 + ')';
+          ctx.fillRect(chk.x - 1, chk.y, chk.text.length * G.cellW + 2, rh);
+          ctx.fillStyle = S.palArr
+            ? 'rgba(' + _rgb(S.palArr[Math.min(S.palArr.length - 1,
+              (((v + 1) / 2) * S.palArr.length) | 0)]) + ',' + inout + ')'
+            : 'hsla(' + (P.hue0 + v * 110 + S.life * 0.05) % 360 + ',95%,64%,' + inout + ')';
+          ctx.fillText(chk.text, chk.x, chk.y + S.vOff);
+        }
+        // Faint ramp glyphs in the empty cells, so the field has a body where
+        // the page has margins.
+        const RAMP = ' ·:+*#';
+        for (const d of S.dots) {
+          const gx = G.left + d.c * G.cellW, gy = G.top + d.r * G.lineH;
+          const v = A.plasmaField(gx, gy, tt, P);
+          const k = (v + 1) / 2;
+          if (k < 0.45) continue;
+          const g = RAMP[Math.min(RAMP.length - 1, (((k - 0.45) / 0.55) * RAMP.length) | 0)];
+          if (g === ' ') continue;
+          ctx.fillStyle = S.palArr
+            ? 'rgba(' + _rgb(S.palArr[Math.min(S.palArr.length - 1, (k * S.palArr.length) | 0)]) + ',' + inout * 0.2 + ')'
+            : 'hsla(' + (P.hue0 + v * 110 + S.life * 0.05) % 360 + ',95%,60%,' + inout * 0.2 + ')';
+          ctx.fillText(g, gx, gy + S.vOff);
+        }
+      } else if (S.kind === 'tunnel') {
+        const G = S.grid, P = S.plan;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const inout = Math.min(1, S.life / 300, Math.max(0, (S.max - S.life) / 380));
+        if (inout <= 0) { ctx.restore(); return; }
+        const phase = (S.life * P.speed) % P.spacing;
+        const seen = new Set();
+        for (let rr = phase; rr < S.maxR; rr += P.spacing) {
+          if (rr < 10) continue;
+          const kk = rr / S.maxR;
+          const aa = inout * (kk < 0.15 ? kk / 0.15 : 1 - kk * 0.6);
+          if (aa <= 0.03) continue;
+          const hue = (P.hue0 + rr * 0.45 + S.life * P.hueRate) % 360;
+          // Sample the circle at roughly one cell per step; big rings get a
+          // coarser step so the outermost ring can't outspend the rest of the
+          // scene put together.
+          const step = Math.max(G.cellW * 1.2, rr * 0.045);
+          const na = Math.max(10, (Math.PI * 2 * rr / step) | 0);
+          for (let i = 0; i < na; i++) {
+            const ang = i / na * TAU;
+            const px = S.cx + Math.cos(ang) * rr, py = S.cy + Math.sin(ang) * rr;
+            const cc = Math.round((px - G.left) / G.cellW);
+            const r2 = Math.round((py - G.top) / G.lineH);
+            if (cc < 0 || r2 < 0 || cc >= G.cols || r2 >= G.rows) continue;
+            const key = r2 * 4096 + cc;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const real = G.cells.get(key);
+            const head = S.palArr
+              ? 'rgba(' + _rgb(S.palArr[((rr / P.spacing) | 0) % S.palArr.length]) + ','
+              : 'hsla(' + hue + ',92%,' + (real ? 70 : 58) + '%,';
+            ctx.fillStyle = head + aa * (real ? 1 : 0.85) + ')';
+            // Rings are drawn in tangent glyphs; prose the ring crosses is
+            // recoloured in place instead.
+            if (real) ctx.fillText(real.ch, real.x, real.y + S.vOff);
+            else ctx.fillText(A.slopeGlyph(-Math.sin(ang), Math.cos(ang)),
+              G.left + cc * G.cellW, G.top + r2 * G.lineH + S.vOff);
+          }
+        }
+        // The mouth of it. Hue quantised so glowSprite's cache stays finite.
+        const spr = glowSprite(S.palArr ? S.palArr[0]
+          : 'hsl(' + Math.round(((P.hue0 + S.life * P.hueRate) % 360) / 30) * 30 + ',92%,60%)');
+        ctx.globalAlpha = inout * 0.5;
+        ctx.drawImage(spr, S.cx - 45, S.cy - 45, 90, 90);
+        ctx.globalAlpha = 1;
+      } else if (S.kind === 'firewall') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const RAMP = A.FIREWALL_RAMP || ' .:;+*x%#@';
+        const MAXH = A.FIREWALL_MAX_HEAT || 36;
+        for (let r2 = 0; r2 < S.frows; r2++) {
+          const gy = G.top + G.h - (S.frows - r2) * G.lineH;
+          const rowIdx = Math.round((gy - G.top) / G.lineH);
+          for (let c2 = 0; c2 < S.cols; c2++) {
+            const h2 = S.heat[r2 * S.cols + c2];
+            if (h2 < 4) continue;
+            const k = h2 / MAXH;
+            const real = G.cells.get(rowIdx * 4096 + (c2 - 1));
+            const hot = real && k > 0.3;
+            const glyph = hot ? real.ch
+              : RAMP[Math.min(RAMP.length - 1, (k * RAMP.length) | 0)];
+            if (glyph === ' ') continue;
+            ctx.fillStyle = (S.palArr
+              ? 'rgba(' + _rgb(S.palArr[Math.min(S.palArr.length - 1, ((1 - k) * S.palArr.length) | 0)]) + ','
+              : 'hsla(' + (4 + k * 44) + ',96%,' + (28 + k * 44 + (k > 0.9 ? 18 : 0)) + '%,')
+              + fade * Math.min(1, k * 1.6) * 0.92 + ')';
+            // Prose standing in the fire is painted as itself, gone hot —
+            // fuel, not casualty. The DOM text is untouched underneath.
+            if (hot) ctx.fillText(glyph, real.x, real.y + S.vOff);
+            else ctx.fillText(glyph, G.left + (c2 - 1) * G.cellW, gy + S.vOff);
+          }
+        }
+      } else if (S.kind === 'cat') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G);
+        ctx.textBaseline = 'alphabetic';
+        const F = S.dir < 0 ? S.mirrorFrames : S.frames;
+        let frame;
+        if (S.st === 'pop') frame = F.sit;
+        else if (S.st === 'sit') frame = (S.life % 1400) < 220 ? F.blink : F.sit;
+        else if (S.st === 'fall') frame = F.fall;
+        else if (S.st === 'land') frame = F.land;
+        else {
+          frame = ((S.stT / S.plan.stepMs) | 0) % 2 ? F.walkB : F.walkA;
+          if ((S.life % S.plan.blinkEvery) < 150) frame = F.blink;
+        }
+        const bob = S.st === 'walk' ? Math.sin(S.life / 130) * 1.2 : 0;
+        const out = Math.min(1, Math.max(0, (S.max - S.life) / 260));
+        // A soft knockout behind the sprite, so the cat reads IN FRONT of the
+        // prose rather than tangled in its letters. The text underneath is
+        // untouched and walks back out the moment the cat does.
+        ctx.fillStyle = 'rgba(' + this._bgRgb(G) + ',' + fade * out * 0.72 + ')';
+        ctx.fillRect(S.x - 2, S.y - frame.length * G.lineH + bob - 2,
+          frame[0].length * G.cellW + 4, frame.length * G.lineH + 4);
+        for (let r2 = 0; r2 < frame.length; r2++) {
+          // Popping out of the line: face first, ears a beat later.
+          if (S.st === 'pop' && S.stT < 170 && r2 === 0) continue;
+          const gy = S.y - (frame.length - r2) * G.lineH + bob + S.vOff;
+          for (let k = 0; k < frame[r2].length; k++) {
+            const ch = frame[r2][k];
+            if (ch === ' ') continue;
+            const face = r2 === 1 && k > 1 && k < frame[r2].length - 2
+              && 'oO^-.<>'.indexOf(ch) !== -1;
+            this._fillText(ctx, ch, S.x + k * G.cellW, gy,
+              face ? S.accent : S.color, fade * out);
+          }
         }
       } else {
         // The line panes: wardial, sniffer, trace, daemon.
         const C = S.cell;
-        ctx.font = C.px + 'px ' + MONO;
+        const yo = S.font ? S.vOff : 0;
+        if (S.font) ctx.textBaseline = 'alphabetic';
+        ctx.font = C.px + 'px ' + (S.font || MONO);
         const shown = Math.min(S.lines.length, Math.floor(S.life / S.per) + 1);
         const first = Math.max(0, shown - S.rows);
-        if (S.title) this._fillText(ctx, '$ ' + S.title, S.box.x, S.box.y - C.h, S.dim, fade * 0.75);
+        if (S.title) this._fillText(ctx, '$ ' + S.title, S.box.x, S.box.y - C.h + yo, S.dim, fade * 0.75);
         for (let i = first; i < shown; i++) {
           const L = S.lines[i];
           const y = S.box.y + (i - first) * C.h;
           const fresh = S.life - i * S.per < 160;
-          this._fillText(ctx, L.text, S.box.x, y,
+          this._fillText(ctx, L.text, S.box.x, y + yo,
             L.hit ? S.accent : S.color,
             fade * (L.hit ? 1 : fresh ? 0.95 : 0.55));
         }
@@ -1687,6 +2268,29 @@
             tw.z -= S.speed * dt;
             if (tw.z <= 0.5) { tw.z += 26; tw.gx = rand(-9, 9); }
           }
+        }
+        // The grid register's moving parts. Fire steps its automaton on a
+        // fixed clock (heat spread at rAF rate would burn twice as fast on a
+        // 120Hz panel); the cat runs its little platformer brain; the skull's
+        // jaw clacks sparks on the way shut.
+        if (S.kind === 'firewall' && A.stepFirewall) {
+          S.acc += dt;
+          while (S.acc >= S.stepMs) {
+            A.stepFirewall(S.heat, S.cols, S.frows, Math.random);
+            S.acc -= S.stepMs;
+          }
+        }
+        if (S.kind === 'cat') this._updateCat(S, dt);
+        if (S.kind === 'skull' && A.jawDropAt) {
+          const drop = A.jawDropAt(S.life, S.plan.chomps);
+          if (S.lastDrop - drop > 0.5) {
+            const G = S.grid;
+            const drift = S.scrollY ? (S.scrollY() - S.scroll0) : 0;
+            this.emit(G.left + (S.c0 + S.plan.w / 2) * G.cellW,
+              G.top + (S.r0 + S.plan.jawTop) * G.lineH - drift,
+              { n: 12, colors: ['#ffffff', '#dff3ff'], speedMax: 4.2, lifeMax: 420 });
+          }
+          S.lastDrop = drop;
         }
         if (S.life >= S.max) this.ascii.splice(i, 1);
       }

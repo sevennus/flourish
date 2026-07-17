@@ -52,6 +52,25 @@ ipcMain.on('chat:send', () => {});
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The grid register measures the REAL transcript, so the probe needs one with
+// some body — an empty screen gives every grid effect an empty snapshot, and
+// they are built to paint NOTHING off one (that's the anti-fallback rule).
+// Long enough to wrap into a dozen-odd lines at the probe's window width.
+const PROSE =
+  'The deploy went out at nine and the alert fired six minutes later, which '
+  + 'nobody noticed because that alert has cried wolf every morning since '
+  + 'April and muting it is the first thing anyone does on arriving. '
+  + 'By eleven the database had been read end to end twice and found blameless '
+  + 'both times, and the configuration change nobody wanted to look at was '
+  + 'still sitting there, small and reviewed by its own author. '
+  + 'The fix took four seconds once somebody asked the obvious question out '
+  + 'loud, which is the part of the timeline that always gets rounded off '
+  + 'before the postmortem reaches anyone senior enough to mind. '
+  + 'Every word on this page is a candidate for incorporation: the skull '
+  + 'assembles out of these letters, the wireframe lights them as it turns, '
+  + 'the plasma repaints them, the firewall burns them as fuel and the cat '
+  + 'walks along the top of them without so much as an apology.';
+
 async function run() {
   const win = new BrowserWindow({
     // show + no throttling, for the reason fx-shots documents: a hidden window
@@ -67,6 +86,10 @@ async function run() {
   await wait(600);
 
   const js = (s) => win.webContents.executeJavaScript(s);
+
+  await js(`document.getElementById('transcript').innerHTML =
+    ${JSON.stringify('<div class="line assistant"><div class="body">' + PROSE + '</div></div>')}; true;`);
+  await wait(200);
 
   const names = await js(`Array.from(window.Flourish.ASCII_EFFECTS);`);
 
@@ -120,6 +143,11 @@ async function run() {
         return realFill(s, x, y);
       };
       ctx.strokeRect = function (x, y, w, h) { if (tap.inDraw) tap.rects++; return realRect(x, y, w, h); };
+      // The grid scenes paint veils, banner blocks and plasma knockouts with
+      // fillRect — count those too or a working grid banner reads as unpainted.
+      const realFillRect = ctx.fillRect.bind(ctx);
+      tap.fills = 0;
+      ctx.fillRect = function (x, y, w, h) { if (tap.inDraw) tap.fills++; return realFillRect(x, y, w, h); };
       // Frame boundaries. Without these there is no such thing as "one frame"
       // here: sleeping 120ms and reading the tap gathers however many frames
       // happened to fit, which reported banner at exactly 7x its ink and looked
@@ -127,15 +155,31 @@ async function run() {
       const realDraw = fx._draw.bind(fx);
       fx._draw = function () {
         const start = tap.texts.length;
+        const fillStart = tap.fills;
         tap.inDraw = true;
         try { var r = realDraw(); } finally { tap.inDraw = false; }
         tap.lastFrame = tap.texts.slice(start);
+        tap.lastFills = tap.fills - fillStart;
         tap.frames++;
         return r;
       };
       window.__tap = tap;
       try {
-        fx.fire('${name}', fx.w / 2, fx.h / 2, {});
+        // Fire the way applyEvents fires: with a real measured grid. Firing
+        // bare would exercise the panes' pre-grid path and the grid effects'
+        // deliberate draw-nothing branch, and this harness would once again be
+        // probing a branch no reader ever reaches.
+        const opts = {};
+        if (window.Flourish.GRID_EFFECTS && window.Flourish.gridSnapshot) {
+          opts.grid = window.Flourish.gridSnapshot();
+          if (opts.grid.cells.size < 120) {
+            throw new Error('probe: grid snapshot holds only ' + opts.grid.cells.size
+              + ' characters — every grid scene below would be probing a fallback');
+          }
+          opts.scrollY = window.Flourish.scrollDrift;
+          if ('${name}' === 'cat') opts.platforms = window.Flourish.linePlatforms;
+        }
+        fx.fire('${name}', fx.w / 2, fx.h / 2, opts);
       } catch (e) { tap.err = String(e && e.stack || e); }
       const S = fx.ascii[0];
       return {
@@ -143,11 +187,18 @@ async function run() {
         kind: S ? S.kind : null,
         max: S ? S.max : 0,
         planned: S ? (S.lines ? S.lines.length
+                    : S.ink ? S.ink.length
                     : S.rows ? S.rows.length
                     : S.cells ? S.cells.length
                     : S.towers ? S.towers.length
                     : S.ports ? S.ports.length
-                    : S.plan ? (S.plan.rows ? S.plan.rows.length : S.plan.cells.length) : 0) : 0,
+                    : S.chunks ? S.chunks.length
+                    : S.heat ? S.heat.length
+                    : S.plan ? (S.plan.rows ? S.plan.rows.length
+                      : S.plan.cells ? S.plan.cells.length
+                      : S.plan.verts ? S.plan.verts.length
+                      : S.plan.spacing ? Math.ceil((S.maxR || 0) / S.plan.spacing)
+                      : S.plan.life ? 1 : 0) : 0) : 0,
         err: tap.err,
       };
     })();`);
@@ -196,9 +247,11 @@ async function run() {
         const hay = t.texts.join('\\u0000');
         hit = want.filter((w) => w && hay.indexOf(String(w).trim().slice(0, 12)) !== -1).length;
       }
-      perChar = S && (S.kind === 'crack' || S.kind === 'skull' || S.kind === 'banner' || S.kind === 'gibson');
+      perChar = S && (S.kind === 'crack' || S.kind === 'skull' || S.kind === 'banner' || S.kind === 'gibson'
+        || S.kind === 'wireframe' || S.kind === 'plasma' || S.kind === 'tunnel'
+        || S.kind === 'firewall' || S.kind === 'cat');
       return {
-        painted: t.texts.length, rects: t.rects, off: t.off, err: t.err,
+        painted: t.texts.length, rects: t.rects, fills: t.fills, off: t.off, err: t.err,
         frames: t.frames, fontUnparsed: t.fontUnparsed || null,
         distinct: new Set(t.texts).size,
         want: want.length, hit,
@@ -233,12 +286,74 @@ async function run() {
           return { ok, got: glyphs.length + ' glyphs in ' + new Set(glyphs).size + ' shapes',
                    want: "'#' and '=' only" };
         }
-        // banner: every lit cell is a '#', and one frame must draw exactly the
-        // phrase's ink once the reveal has finished.
+        if (S.kind === 'wireframe') {
+          // One frame of a tumbling solid: mostly slope strokes, and at least
+          // two DISTINCT stroke glyphs — a rotation that only ever draws '-'
+          // has degenerated into a flat line. The rest is prose it lit up.
+          const strokes = glyphs.filter((c) => '-\\\\|/o'.indexOf(c) !== -1);
+          const ok = glyphs.length >= 40 && new Set(strokes).size >= 2
+            && strokes.length >= glyphs.length * 0.3;
+          return { ok, got: glyphs.length + ' glyphs, ' + strokes.length + ' strokes',
+                   want: 'a stroked solid over lit prose' };
+        }
+        if (S.kind === 'plasma') {
+          // The transcript IS the raster: the strings hitting the canvas must
+          // be the transcript's own words, over their knockout rects. A plasma
+          // painting anything else is a lightshow about nothing.
+          const hay = t.lastFrame.join('\\u0000');
+          const wants = S.chunks.slice(0, 8).map((c) => c.text);
+          const hit2 = wants.filter((w) => hay.indexOf(w) !== -1).length;
+          return { ok: hit2 >= 6 && t.lastFills > 0,
+                   got: hit2 + '/' + wants.length + ' prose chunks, ' + t.lastFills + ' knockouts',
+                   want: 'the page repainted in place' };
+        }
+        if (S.kind === 'tunnel') {
+          const strokes = glyphs.filter((c) => '-\\\\|/'.indexOf(c) !== -1);
+          const ok = glyphs.length >= 60 && strokes.length >= 20;
+          return { ok, got: glyphs.length + ' glyphs, ' + strokes.length + ' tangents',
+                   want: 'rings of tangent strokes' };
+        }
+        if (S.kind === 'firewall') {
+          const ramp = ' .:;+*x%#@';
+          const hot = glyphs.filter((c) => ramp.indexOf(c) > 4).length;
+          const ok = glyphs.length >= 150 && hot >= 20;
+          return { ok, got: glyphs.length + ' cells alight, ' + hot + ' hot',
+                   want: 'a wall of graded heat' };
+        }
+        if (S.kind === 'cat') {
+          const got2 = glyphs.join('');
+          const ok = glyphs.length >= 8 && got2.indexOf('(') !== -1 && got2.indexOf('=') !== -1;
+          return { ok, got: JSON.stringify(got2.slice(0, 20)), want: 'a cat-shaped set of glyphs' };
+        }
+        // banner: on the grid, every lit cell is a fillRect block (with the
+        // page's characters knocked out of it in page-black); floating, every
+        // lit cell is a '\u2588'. Count whichever family this scene actually is.
+        if (S.ink) {
+          const lit = S.ink.filter((c) => S.life >= c.c * S.per).length;
+          return { ok: lit > 0 && t.lastFills === lit,
+                   got: t.lastFills + ' blocks in one frame',
+                   want: lit + ' lit cells in ' + JSON.stringify(S.text) };
+        }
         const ink = S.rows.join('').split('#').length - 1;
         const drawn = glyphs.filter((c) => c === '\u2588').length;
         return { ok: drawn === ink, got: drawn + " '#' drawn", want: ink + ' lit cells in ' + JSON.stringify(S.text) };
       })();`);
+    }
+
+    // The cat is the one scene whose evidence is MOTION: a cat that paints
+    // beautifully and never moves is a sticker. Sits are legitimate and last
+    // up to ~2.2s, so the window has to be wider than any sit — sample for 4s
+    // and ask whether it EVER moved, not whether it happened to be mid-stride.
+    let catMoved = null;
+    if (mid.kind === 'cat') {
+      const xs = [];
+      for (let k = 0; k < 6; k++) {
+        const xk = await js(`window.__probe.ascii[0] ? window.__probe.ascii[0].x : null;`);
+        if (xk == null) break;
+        xs.push(xk);
+        await wait(800);
+      }
+      catMoved = xs.length >= 2 && (Math.max(...xs) - Math.min(...xs)) > 8;
     }
 
     // Past the end of its life: it must reap itself.
@@ -256,9 +371,9 @@ async function run() {
 
     results.push({
       name, kind: r.kind, planned: r.planned,
-      painted: mid.painted, rects: mid.rects, off: mid.off,
+      painted: mid.painted, rects: mid.rects, fills: mid.fills, off: mid.off,
       distinct: mid.distinct, want: mid.want, hit: mid.hit,
-      faithful, charOracle, fontUnparsed: mid.fontUnparsed,
+      faithful, charOracle, catMoved, fontUnparsed: mid.fontUnparsed,
       reaped: end.alive === 0,
       err: r.err || mid.err || end.err,
     });
@@ -277,8 +392,11 @@ async function run() {
     if (r.charOracle && !r.charOracle.ok) {
       console.log('      wanted', JSON.stringify(r.charOracle.want), 'got', JSON.stringify(r.charOracle.got));
     }
-    const painted = r.painted > 0 || r.rects > 0;
+    // A grid banner is fillRect blocks with knockout glyphs — fills count as
+    // paint, or a working banner reads as a blank one.
+    const painted = r.painted > 0 || r.rects > 0 || r.fills > 0;
     if (!r.planned || !painted || r.off > 0 || r.faithful === false || !r.reaped || r.err) bad++;
+    if (r.catMoved === false) { console.log('      !! the cat never moved'); bad++; }
     if (r.err) console.log('    ', r.err.split('\n')[0]);
     // The off-screen check is only as good as the glyph size it measures
     // against. If the font ever fails to parse the threshold is a guess, and a
@@ -293,12 +411,12 @@ async function run() {
   console.log('\n=== verdict ===');
   console.log('scenes probed:                  ', results.length);
   console.log('planned content:                ', pct((r) => r.planned > 0));
-  console.log('actually painted to the canvas: ', pct((r) => r.painted > 0 || r.rects > 0));
+  console.log('actually painted to the canvas: ', pct((r) => r.painted > 0 || r.rects > 0 || r.fills > 0));
   console.log('every draw inside the viewport: ', pct((r) => r.off === 0));
   console.log('painted their OWN content:      ', pct((r) => r.faithful !== false));
   console.log('reaped themselves:              ', pct((r) => r.reaped));
   console.log('threw:                          ', results.filter((r) => r.err).length);
-  console.log(bad === 0 ? '\nALL TEN SCENES PAINT WHAT THEY PLAN: yes' : `\nBROKEN SCENES: ${bad}`);
+  console.log(bad === 0 ? '\nALL FIFTEEN SCENES PAINT WHAT THEY PLAN: yes' : `\nBROKEN SCENES: ${bad}`);
 
   win.destroy();
   app.exit(bad === 0 ? 0 : 1);

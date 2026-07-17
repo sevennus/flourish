@@ -54,6 +54,23 @@
   const ASCII_EFFECTS = new Set([
     'gibson', 'wardial', 'crack', 'banner', 'sniffer',
     'trace', 'daemon', 'portscan', 'skull', 'overflow',
+    'wireframe', 'plasma', 'tunnel', 'firewall', 'cat',
+  ]);
+
+  // The grid register: effects that are painted INTO the terminal's own
+  // character grid rather than floating over it. The renderer measures the
+  // grid — cell size, every visible character and where it sits — and hands
+  // the snapshot in as o.grid (plus o.platforms for the cat). Two rules:
+  //
+  //   1. Wherever the effect's ink lands on a REAL character, it uses that
+  //      character — the prose itself lights up, and the effect is visibly
+  //      built out of what was already on screen.
+  //   2. No grid, no paint. A grid effect fired bare must draw NOTHING —
+  //      this repo's signature bug is an effect quietly running a fallback
+  //      and photographing well (apophenia, fx-shots, the probe's font
+  //      regex). A blank shot is a failure someone sees.
+  const GRID_EFFECTS = new Set([
+    'skull', 'banner', 'wireframe', 'plasma', 'tunnel', 'firewall', 'cat',
   ]);
 
   // Which directive names are point effects vs. wrapping style spans.
@@ -170,11 +187,16 @@
    * killing the effect.
    */
   function parseArgs(raw) {
-    const out = { palette: null, scale: 1 };
+    // `words` carries every arg that isn't a palette or a size, in order —
+    // that's how a directive names a variant ({{fx:wireframe prism}}) without
+    // each effect growing its own parser. Unknown words still cost nothing:
+    // an effect that doesn't read o.words behaves exactly as before.
+    const out = { palette: null, scale: 1, words: [] };
     for (const w of String(raw || '').toLowerCase().split(/\s+/)) {
       if (!w) continue;
       if (PALETTES.has(w)) out.palette = w;
       else if (SIZES[w] != null) out.scale = SIZES[w];
+      else out.words.push(w);
     }
     return out;
   }
@@ -1251,6 +1273,256 @@
     return towers;
   }
 
+  // ---- the grid register: planners ----
+  //
+  // Same contract as the ASCII scenes: every fact a grid effect paints is
+  // decided here, pure and seeded, so `node --test` can pin it without a
+  // canvas. effects.js keeps only geometry and paint.
+
+  // The skull's mandible starts at this row of SKULL — everything from the
+  // lower teeth down is jaw, and the jaw is what moves.
+  const SKULL_JAW_ROW = 8;
+
+  // The chomp choreography: when the jaw opens, how long it gapes, how fast
+  // it snaps shut. Times are ms into the scene; the cycles must not overlap.
+  // The rez takes ~1.1s (see planSkull), so the first chomp waits for a whole
+  // skull to chomp with.
+  const SKULL_CHOMPS = [
+    { at: 1300, open: 320, hold: 260, snap: 90 },
+    { at: 2150, open: 260, hold: 210, snap: 80 },
+    { at: 2850, open: 300, hold: 230, snap: 90 },
+  ];
+  const JAW_DROP = 1.6;   // rows of gape at full stretch
+
+  /**
+   * Where the jaw is, in rows below rest, `ms` into the scene.
+   * Ease out on the open (muscle), linear on the snap (gravity) — the snap
+   * being fast is what makes it a chomp rather than a yawn.
+   */
+  function jawDropAt(ms, chomps) {
+    for (const ch of (chomps || SKULL_CHOMPS)) {
+      const t = ms - ch.at;
+      if (t < 0) continue;
+      if (t < ch.open) { const k = t / ch.open; return JAW_DROP * (1 - (1 - k) * (1 - k)); }
+      if (t < ch.open + ch.hold) return JAW_DROP;
+      if (t < ch.open + ch.hold + ch.snap) {
+        return JAW_DROP * (1 - (t - ch.open - ch.hold) / ch.snap);
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * The skull as cells: each with its glyph, its grid offset, whether it
+   * belongs to the jaw, and its own rez schedule. `at` is when the cell
+   * starts scrambling — showing whatever REAL character sits under it, or a
+   * spinning glyph over bare ground — and `lockAt` is when it settles into
+   * the art. The scatter is the point: an image that assembles in reading
+   * order reads as text.
+   */
+  function planSkull(rnd) {
+    const r = rnd || Math.random;
+    const cells = [];
+    for (let row = 0; row < SKULL.length; row++) {
+      for (let col = 0; col < SKULL[row].length; col++) {
+        const ch = SKULL[row][col];
+        if (ch === ' ') continue;
+        const at = r() * 900;
+        cells.push({
+          ch, r: row, c: col,
+          jaw: row >= SKULL_JAW_ROW,
+          eye: ch === 'o',
+          at, lockAt: at + 180 + r() * 240,
+        });
+      }
+    }
+    return {
+      cells, w: SKULL[0].length, h: SKULL.length,
+      jawTop: SKULL_JAW_ROW, chomps: SKULL_CHOMPS, drop: JAW_DROP,
+    };
+  }
+
+  // Wireframe solids. Verts on the unit ball, edges as index pairs — the
+  // engine rotates, projects and rasterises per frame, but WHAT spins is
+  // decided here.
+  const WIREFRAME_SHAPES = ['sphere', 'prism', 'cube'];
+
+  function planWireframe(shape, rnd) {
+    const r = rnd || Math.random;
+    const kind = WIREFRAME_SHAPES.indexOf(shape) !== -1
+      ? shape
+      : WIREFRAME_SHAPES[(r() * WIREFRAME_SHAPES.length) | 0];
+    const verts = [], edges = [];
+    const ring = (n, at) => {
+      const base = verts.length;
+      for (let i = 0; i < n; i++) {
+        verts.push(at(i / n * Math.PI * 2));
+        edges.push([base + i, base + (i + 1) % n]);
+      }
+      return base;
+    };
+    if (kind === 'sphere') {
+      // Latitude rings + three great circles through the poles. A sphere has
+      // no edges of its own, so the wireframe IS the sphere — too few rings
+      // and it's an atom diagram, too many and it's a fillrate bill.
+      for (const phi of [-54, -18, 18, 54]) {
+        const p = phi * Math.PI / 180, y = Math.sin(p), rad = Math.cos(p);
+        ring(14, (a) => [Math.cos(a) * rad, y, Math.sin(a) * rad]);
+      }
+      for (const th of [0, 60, 120]) {
+        const t0 = th * Math.PI / 180;
+        ring(18, (a) => [Math.cos(a) * Math.cos(t0), Math.sin(a), Math.cos(a) * Math.sin(t0)]);
+      }
+    } else if (kind === 'prism') {
+      // A long triangular prism — the laser-show one. Length along z so the
+      // tumble shows it end-on and side-on in one life.
+      const L = 1.05, R2 = 0.62;
+      for (const z of [-L, L]) {
+        for (let i = 0; i < 3; i++) {
+          const a = i / 3 * Math.PI * 2 + Math.PI / 6;
+          verts.push([Math.cos(a) * R2, Math.sin(a) * R2, z]);
+        }
+      }
+      for (const b of [0, 3]) for (let i = 0; i < 3; i++) edges.push([b + i, b + (i + 1) % 3]);
+      for (let i = 0; i < 3; i++) edges.push([i, i + 3]);
+    } else {
+      const s = 0.68;
+      for (const x of [-s, s]) for (const y of [-s, s]) for (const z of [-s, s]) verts.push([x, y, z]);
+      // Pairs differing in exactly one axis — a cube's 12 edges.
+      for (let i = 0; i < 8; i++) {
+        for (const j of [i ^ 1, i ^ 2, i ^ 4]) if (j > i) edges.push([i, j]);
+      }
+    }
+    return {
+      kind, verts, edges,
+      // Two independent tumble rates (rad/ms), one of them signed, so no two
+      // castings spin alike and the rotation never degenerates into a flat
+      // spin about one axis.
+      rateA: (0.9 + r() * 0.5) * 0.0016 * (r() < 0.5 ? -1 : 1),
+      rateB: (0.6 + r() * 0.5) * 0.0011,
+      tilt: r() * Math.PI * 2,
+    };
+  }
+
+  /**
+   * Which glyph a stroke through a cell should be, from the stroke's on-screen
+   * direction in PIXELS (y down). Fold the angle into four octant pairs:
+   * horizontal, down-right, vertical, up-right.
+   */
+  function slopeGlyph(dx, dy) {
+    if (!dx && !dy) return '·';
+    const oct = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) & 3;
+    return ['-', '\\', '|', '/'][oct];
+  }
+
+  /**
+   * The cells a segment crosses, endpoints in fractional cell coords.
+   * Stepped on the longer axis so a line can't gap however the aspect ratio
+   * of the cells distorts it.
+   */
+  function rasterCells(c0, r0, c1, r1) {
+    const n = Math.max(Math.abs(c1 - c0), Math.abs(r1 - r0));
+    if (n < 1) return [{ c: Math.round(c0), r: Math.round(r0) }];
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const c = Math.round(c0 + (c1 - c0) * i / n), r = Math.round(r0 + (r1 - r0) * i / n);
+      if (!out.length || out[out.length - 1].c !== c || out[out.length - 1].r !== r) out.push({ c, r });
+    }
+    return out;
+  }
+
+  // Plasma: three drifting sine fields summed and normalised to -1..1. The
+  // coefficients are the plan; the field is pure so a test can pin its range.
+  function planPlasma(rnd) {
+    const r = rnd || Math.random;
+    return {
+      f1: 0.006 + r() * 0.004, f2: 0.008 + r() * 0.005, f3: 0.004 + r() * 0.003,
+      p1: r() * Math.PI * 2, p2: r() * Math.PI * 2, p3: r() * Math.PI * 2,
+      speed: 0.0012 + r() * 0.0008,
+      hue0: r() * 360,
+    };
+  }
+
+  function plasmaField(x, y, t, P) {
+    return (Math.sin(x * P.f1 + t + P.p1)
+      + Math.sin(y * P.f2 - t * 1.3 + P.p2)
+      + Math.sin((x + y) * P.f3 + t * 0.7 + P.p3)) / 3;
+  }
+
+  function planTunnel(rnd) {
+    const r = rnd || Math.random;
+    return {
+      spacing: 46 + r() * 18,        // px between rings
+      speed: 0.055 + r() * 0.04,     // px/ms outward
+      hue0: r() * 360,
+      hueRate: 0.055,                // deg/ms of drift
+    };
+  }
+
+  // Firewall: the doom-fire cellular automaton. `heat` is row-major,
+  // rows*cols, row 0 at the TOP of the fire; the bottom row is the source and
+  // is re-flickered every step. Each cell pulls from roughly below itself,
+  // cooled a little — heat can only climb by having been hotter underneath,
+  // which is the whole physics of the thing.
+  const FIREWALL_MAX_HEAT = 36;
+  const FIREWALL_RAMP = ' .:;+*x%#@';
+
+  function stepFirewall(heat, cols, rows, rnd) {
+    const r = rnd || Math.random;
+    for (let c = 0; c < cols; c++) {
+      heat[(rows - 1) * cols + c] = FIREWALL_MAX_HEAT - ((r() * 6) | 0);
+    }
+    for (let row = 0; row < rows - 1; row++) {
+      for (let c = 0; c < cols; c++) {
+        const drift = ((r() * 3) | 0) - 1;
+        const sc = Math.min(cols - 1, Math.max(0, c + drift));
+        const cool = 2 + ((r() * 3.2) | 0);
+        heat[row * cols + c] = Math.max(0, heat[(row + 1) * cols + sc] - cool);
+      }
+    }
+    return heat;
+  }
+
+  function planFirewall(rnd) {
+    const r = rnd || Math.random;
+    return { rows: 10 + ((r() * 4) | 0), stepMs: 40 };
+  }
+
+  // The cat. Two rows of glyphs, facing right, tail trailing. Frames are
+  // data; mirroring is arithmetic; everything about WHERE it walks comes from
+  // the renderer's measured line platforms at runtime.
+  const CAT_W = 8;
+  const CAT_FRAMES = {
+    walkA: ['  /\\_/\\ ', '~(=o.o=)'],
+    walkB: ['  /\\_/\\ ', '-(=o.o=)'],
+    sit:   ['  /\\_/\\ ', '~(=^.^=)'],
+    blink: ['  /\\_/\\ ', '~(=-.-=)'],
+    fall:  ['  /\\_/\\ ', ' (=O.O=)'],
+    land:  ['        ', '~(=>.<=)'],
+  };
+  const CAT_MIRROR = { '(': ')', ')': '(', '/': '\\', '\\': '/', '<': '>', '>': '<' };
+
+  function mirrorCatFrame(rows) {
+    return rows.map((row) => row.split('').reverse()
+      .map((ch) => CAT_MIRROR[ch] || ch).join(''));
+  }
+
+  function planCat(rnd) {
+    const r = rnd || Math.random;
+    return {
+      speed: 0.055 + r() * 0.025,    // px/ms of walk
+      stepMs: 150,                   // gait frame flip
+      life: 8000 + r() * 3000,
+      dir: r() < 0.5 ? -1 : 1,
+      // Measured, not vibes: at 0.0004/ms the first cut sat every ~2.5s and
+      // spent half its life parked — a rug, not a cat. One sit per ~5-6s of
+      // walking reads as a cat with somewhere to be.
+      sitP: 0.00018,
+      turnP: 0.25,                   // chance a sit ends in walking back the other way
+      blinkEvery: 2200 + r() * 1400,
+    };
+  }
+
   return {
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
     MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS,
@@ -1266,5 +1538,10 @@
     SNIFFER_PAYLOADS, TRACE_HOPS, PORT_SVC, CRACK_WORDS, CRACK_CHARSET,
     planWardial, planSniffer, planTrace, planDaemon, planPortscan,
     planOverflow, planCrack, planGibson,
+    GRID_EFFECTS, SKULL_JAW_ROW, SKULL_CHOMPS, JAW_DROP, jawDropAt, planSkull,
+    WIREFRAME_SHAPES, planWireframe, slopeGlyph, rasterCells,
+    planPlasma, plasmaField, planTunnel,
+    FIREWALL_MAX_HEAT, FIREWALL_RAMP, stepFirewall, planFirewall,
+    CAT_W, CAT_FRAMES, mirrorCatFrame, planCat,
   };
 });

@@ -1,0 +1,168 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish — the grid register: effects that paint themselves out of the prose</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  h3{font-size:14px;color:#9fd5e6;margin-top:22px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  ul li{margin:5px 0}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+  .back{display:inline-block;margin-bottom:18px;color:#94a3b8;text-decoration:none;font-size:13px}
+  .back:hover{color:#e0b54a}
+</style></head><body>
+
+<a class="back" href="../index.html">&larr; back to writeups</a>
+
+<h1>The grid register: effects that paint themselves out of the prose</h1>
+<p class="meta">Branch <code>main</code> · flourish.js, effects.js, renderer.js, prompt.js, demo.js, tools/ascii-probe.js, tools/fx-shots.js · 2026-07-17</p>
+
+<h2>The ask</h2>
+<blockquote>"with the ascii art, it shouldn't be line art just floating in the window. it should be ascii
+art on the screen, incorporating the characters on the screen. The skull should animate, it's jaw should
+move. there should be like a spinning wireframe sphere / prism. also should make an effect where a small
+cat pops out of the text and can walk along the lines of adjacent text, even falling to lower lines of
+text. id like more effects that have a lot of colors and shaped and such but that they try to emulate
+using the character grid in the console."</blockquote>
+
+<p>Four asks, one architectural answer: the terminal's text has a <b>character grid</b>, and effects
+should live IN it &mdash; same font, same cells, same rows as the prose &mdash; and be <b>built out of
+the characters already on screen</b>, not painted over them at some unrelated size.</p>
+
+<h2>The grid layer</h2>
+
+<p>The division of labour stays where every prior effect put it: <b>the renderer owns the text, so the
+renderer measures; the engine gets numbers.</b> Two new measurement functions in
+<code>renderer.js</code>:</p>
+
+<ul>
+<li><code>gridSnapshot()</code> &mdash; walks the visible transcript in <b>runs</b> (maximal non-space
+slices of a text node): one Range rect per run, a few hundred reads for a full screen, the same order
+lightning already pays. Monospace means every character inside a run sits at
+<code>left&nbsp;+&nbsp;k·cellW</code> exactly. Returns cell metrics (advance width <i>measured</i> off
+the longest runs, median not mean), the font, and a map from grid cell &rarr; the real character there
+with its <b>true measured position</b> &mdash; because the 10px paragraph margins mean the uniform grid
+and the actual rows drift apart down the page, and painting a "replaced" glyph 3px off its DOM twin
+reads as ghosting.</li>
+<li><code>linePlatforms()</code> &mdash; the same runs, merged per row into ledge segments. Gaps wider
+than a couple of cells split a row: the end of a paragraph is a real edge to fall off. This is the cat's
+level geometry.</li>
+</ul>
+
+<p>Both are exposed on <code>window.Flourish</code> for the harnesses, for exactly the reason
+<code>strikeTargets</code> is: <b>a harness that fires these bare is photographing a branch no reader
+ever reaches.</b></p>
+
+<p>Three rules the whole register obeys:</p>
+<ul>
+<li><b>Incorporation.</b> Wherever an effect's ink lands on a real character, it paints <i>that
+character</i> &mdash; the prose lights up, recolours, or burns as part of the picture. Where the page is
+empty, the effect brings its own glyphs.</li>
+<li><b>No fallback.</b> A grid effect fired without a grid paints <i>nothing</i>. This repo has now
+shipped an invisible-but-photogenic fallback three separate times (apophenia, salvage, the probe's font
+regex); blank is a failure someone sees.</li>
+<li><b>Nothing is destroyed.</b> Every recolour, knockout and veil is canvas over untouched DOM. The
+prose walks out unharmed when the scene fades &mdash; the one standing rule about Jim and text that
+erodes.</li>
+</ul>
+
+<p>Scenes that ride on text also ride <i>with</i> it: each carries <code>scrollDrift</code> and
+translates by the scroll delta per frame, the same aliasing salvage pays for.</p>
+
+<h2>What shipped</h2>
+
+<table>
+<tr><th>effect</th><th>what it is</th><th>incorporation</th></tr>
+<tr><td><code>skull</code> (rebuilt)</td><td>on the grid at text scale, rezzes scattered, jaw CHOMPS on a pure choreography (<code>jawDropAt</code>), sparks on the clack, eyes pulse</td><td>each cell rezzes as the real character under it, lit, before locking into the art</td></tr>
+<tr><td><code>banner</code> (rebuilt)</td><td>ink cells become solid blocks exactly one character × one line</td><td>real characters are knocked out of the blocks in page-black &mdash; the prose shows through the letterforms</td></tr>
+<tr><td><code>wireframe</code></td><td>sphere / prism / cube (<code>{{fx:wireframe prism}}</code>), midpoint-free true 3D: tumble, pinhole projection, rasterised into cells with slope glyphs <code>- \ | /</code></td><td>an edge crossing a real character lights that character instead</td></tr>
+<tr><td><code>plasma</code></td><td>three drifting sine fields; the transcript is the raster</td><td>every word repainted in place in the field's colour over a knockout; faint ramp glyphs give the field body in the margins</td></tr>
+<tr><td><code>tunnel</code></td><td>concentric rings of tangent glyphs rushing out from the caret, hue cycling with radius</td><td>rings recolour the words they pass through</td></tr>
+<tr><td><code>firewall</code></td><td>the doom-fire automaton (<code>stepFirewall</code>, pure, on a fixed 40ms clock so refresh rate doesn't change the physics), glyph ramp <code>&nbsp;.:;+*x%#@</code>, ember gradient, pinned to the viewport bottom</td><td>prose standing in the fire is painted as itself gone hot &mdash; fuel, not casualty</td></tr>
+<tr><td><code>cat</code></td><td>two-row glyph sprite with a platformer brain: pops out of a line, walks, sits, blinks, falls off paragraph edges, lands with a squash, re-measures its platforms as the transcript grows</td><td>it platforms on the measured geometry of what you wrote</td></tr>
+</table>
+
+<p>The seven older panes (wardial, sniffer, trace, daemon, portscan, overflow &mdash; not crack or
+gibson, which are deliberately cinematic) take the snapshot as an upgrade: with it they snap to the
+text's rows and columns and print in the page's own face, like terminal output instead of a floating
+window. Bare, they keep their old path.</p>
+
+<div class="two">
+<figure><img src="scene-skull.png" alt="skull"><figcaption><code>skull</code> at 1550ms &mdash; on the grid, veiled, jaw caught mid-chomp (the gap between the teeth rows).</figcaption></figure>
+<figure><img src="scene-banner.png" alt="banner"><figcaption><code>banner</code> &mdash; block mosaic on the grid; where it crosses the prose line, the characters are punched out of the blocks.</figcaption></figure>
+<figure><img src="scene-wireframe-sphere.png" alt="sphere"><figcaption><code>wireframe sphere</code> &mdash; slope-glyph rings; the words "obvious question out", "bolt picks" lit where edges cross them.</figcaption></figure>
+<figure><img src="scene-wireframe-cube.png" alt="cube"><figcaption><code>wireframe cube</code> &mdash; corners as <code>o</code>, prose catching the strokes.</figcaption></figure>
+<figure><img src="scene-plasma.png" alt="plasma"><figcaption><code>plasma</code> &mdash; the prose IS the raster; ramp dots carry the field through the margins.</figcaption></figure>
+<figure><img src="scene-tunnel.png" alt="tunnel"><figcaption><code>tunnel</code> &mdash; tangent-glyph rings, hue by radius, words recoloured in the wavefronts.</figcaption></figure>
+<figure><img src="scene-firewall.png" alt="firewall"><figcaption><code>firewall</code> at 1800ms &mdash; the automaton fully climbed: source white-hot, tips flickering out as <code>:</code> and <code>.</code></figcaption></figure>
+<figure><img src="cat-repro.png" alt="cat"><figcaption><code>cat</code> &mdash; ears over the paragraph gap, face walking across "them, and". Platforms are the measured lines.</figcaption></figure>
+</div>
+
+<h2>How it was verified (and what the harnesses caught this time)</h2>
+
+<p>The pattern from the ASCII-scenes build, kept on purpose: <b>plan pure, probe the paint, then look
+anyway.</b></p>
+
+<ul>
+<li><b>Unit tests</b> (215, all green): every planner at seven seeds &mdash; the jaw shut at rest and at
+death, never past full gape, chomps non-overlapping; every wireframe a closed graph inside the unit
+ball; rastered segments connected (a gap is a dashed stroke); the plasma field bounded; firewall heat
+bounded and cooler with height; cat frames rigid and mirroring an involution. Plus the prompt-parity
+test, which is what <i>forces</i> a new name into prompt.js before it can ship.</li>
+<li><b><code>ascii-probe</code></b>, extended to fire the way <code>applyEvents</code> fires: real
+prose, real snapshot, and it <b>throws</b> if the grid comes back thin. New oracles per scene: plasma's
+canvas strings must BE the transcript's own words; a wireframe frame must hold two distinct stroke
+glyphs (one glyph = a rotation degenerated to a line); the cat must <i>move</i> across a 4s window.
+Verdict: <span class="good">15/15 planned, painted, on-screen, faithful, reaped</span>
+(<a href="probe-output.txt">full output</a>).</li>
+<li><b><code>fx-shots</code></b>: eleven new frames over real prose, then actually read as images
+&mdash; the step that has caught what counts cannot (gibson's smear). This time looking caught nothing
+the probe missed; the probe caught what looking missed (below).</li>
+<li><b><code>npm run smoke:web</code></b> against the running server: green.</li>
+</ul>
+
+<h3>The three things the harnesses caught</h3>
+
+<ol>
+<li><b>The probe couldn't see a banner made of blocks.</b> It counted <code>fillText</code> and
+<code>strokeRect</code>; the grid banner is <code>fillRect</code> blocks plus knockout glyphs, so a
+correct banner probed as <span class="bad">painted&nbsp;0</span>. The tap now counts fills, per frame.
+Same lesson as the 126px font regex: <i>when a working feature fails the harness, suspect the harness
+first.</i></li>
+<li><b>The cat's motion check was narrower than a sit.</b> Sits last up to ~2.2s; the check sampled
+inside one and printed <span class="bad">"the cat never moved"</span> about a working cat. The window is
+now 4s of samples &mdash; and the tracing that proved the cat innocent also showed it sitting every
+~2.5s, half its life parked. <code>sitP</code> tuned 0.0004&rarr;0.00018: a cat with somewhere to be.</li>
+<li><b>One capture race.</b> A single <code>fx-shots</code> cat frame came back catless with a smeared
+compositor band; three independent reproductions (state trace, draw-call tap, fresh screenshot) showed
+the cat present and painting. xvfb software-GL <code>capturePage</code> can catch a frame mid-composite;
+noted here so the next blank single frame gets re-shot before it gets "fixed".</li>
+</ol>
+
+<h2>Decisions worth recording</h2>
+<ul>
+<li><b><code>parseArgs</code> grew a <code>words</code> pass-through</b> so <code>wireframe</code> can
+hear <code>sphere · prism · cube</code> without every effect growing its own parser. Unknown words cost
+nothing.</li>
+<li><b>Plasma recolours per chunk (&le;7 chars), not per character</b> &mdash; one
+<code>fillText</code> per chunk keeps a full screen of prose near gibson's measured frame budget, and
+colour resolution at 7 characters is invisible at plasma's spatial frequencies.</li>
+<li><b>The canvas baseline is derived from the measured run height</b> (<code>rh</code>, median), not
+from the font size &mdash; that's what makes a canvas glyph land exactly on its DOM twin, and it is why
+the plasma shot shows no doubling.</li>
+<li><b>Scale args don't resize grid scenes</b> &mdash; a grid effect at 1.3&times; cell size is no
+longer on the grid. <code>wireframe</code> maps scale to radius; the others ignore it.</li>
+</ul>
+
+<p class="meta">Vocabulary: 74 effects. prompt.js and demo.js are baked into the server at startup
+&mdash; the new names go live on the next <code>systemctl restart flourish</code>, which (standing rule)
+is Jim's command to run, not this session's.</p>
+
+</body></html>

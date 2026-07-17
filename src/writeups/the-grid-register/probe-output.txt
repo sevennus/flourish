@@ -1,0 +1,29 @@
+
+=== counts ===
+scene       planned  painted  boxes  off-screen  own content   reaped 
+gibson      34       52602    2931   0           yes (glyphs)  yes     
+wardial     18       1284     0      0           18/18         yes     
+crack       4        455      0      0           yes (glyphs)  yes     
+banner      123      0        0      0           yes (glyphs)  yes     
+sniffer     6        349      0      0           6/6           yes     
+trace       9        901      0      0           9/9           yes     
+daemon      15       1304     0      0           15/15         yes     
+portscan    32       2868     0      0           32/32         yes     
+skull       80       4848     0      0           yes (glyphs)  yes     
+overflow    6        895      0      0           6/6           yes     
+wireframe   8        15445    0      0           yes (glyphs)  yes     
+plasma      173      45659    0      0           yes (glyphs)  yes     
+tunnel      11       54975    0      0           yes (glyphs)  yes     
+firewall    1250     92566    0      0           yes (glyphs)  yes     
+cat         1        1076     0      0           yes (glyphs)  yes     
+
+=== verdict ===
+scenes probed:                   15
+planned content:                 15/15
+actually painted to the canvas:  15/15
+every draw inside the viewport:  15/15
+painted their OWN content:       15/15
+reaped themselves:               15/15
+threw:                           0
+
+ALL FIFTEEN SCENES PAINT WHAT THEY PLAN: yes

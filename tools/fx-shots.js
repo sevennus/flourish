@@ -239,6 +239,51 @@ async function run() {
   }
   await reset();
 
+  // The grid register + the panes it upgraded. These paint out of the
+  // characters on screen, so each is shot over real prose with a real measured
+  // grid — fired bare, a grid effect draws NOTHING by design, and a blank shot
+  // here means the wiring broke, not the harness. The snapshot size is
+  // asserted for the same reason lightning's anchors are: a thin grid is this
+  // family's fallback path, and this file has photographed a fallback before.
+  const GRID_SHOTS = [
+    ['skull', 1550],              // mid-first-chomp: the jaw visibly open
+    ['banner', 1400],
+    ['wireframe-sphere', 950],
+    ['wireframe-prism', 950],
+    ['wireframe-cube', 950],
+    ['plasma', 1400],
+    ['tunnel', 1500],
+    ['firewall', 1800],           // the automaton needs ~½s to climb
+    ['cat', 1600],
+    ['wardial-grid', 1500],
+    ['portscan-grid', 1300],
+  ];
+  console.log('grid scenes (over prose, fired the way applyEvents fires them):');
+  for (const [label, delay] of GRID_SHOTS) {
+    await reset();
+    await setTranscript(`<div class="line assistant"><div class="body">${PROSE}</div></div>`);
+    await wait(200);
+    await reset();
+    const name = label.split('-')[0];
+    const word = label.indexOf('-') !== -1 ? label.split('-')[1] : null;
+    await win.webContents.executeJavaScript(`
+      (function () {
+        const g = window.Flourish.gridSnapshot();
+        if (!g || g.cells.size < 120) throw new Error('fx-shots: grid holds only '
+          + (g ? g.cells.size : 0) + ' characters — this shot would photograph a fallback');
+        const o = { grid: g, scrollY: window.Flourish.scrollDrift };
+        ${word && word !== 'grid' ? `o.words = ['${word}'];` : ''}
+        if ('${name}' === 'cat') o.platforms = window.Flourish.linePlatforms;
+        window.__fx.fire('${name}', 560, 380, o);
+        return true;
+      })();`);
+    await wait(delay);
+    await shoot(win, 'scene-' + label);
+  }
+  await reset();
+  await setTranscript(PLAIN);
+  await wait(160);
+
   console.log('palettes (spark):');
   for (const pal of PALETTE_SHOTS) {
     await reset();

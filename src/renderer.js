@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const { FlourishParser, PER_CHAR_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS, parseArgs } = window.Flourish;
+  const { FlourishParser, PER_CHAR_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS, GRID_EFFECTS, parseArgs } = window.Flourish;
   const { AutoStyler } = window.AutoFX;
   const api = window.flourishAPI;
   const el = (id) => document.getElementById(id);
@@ -472,6 +472,143 @@
   }
 
   /*
+   * The terminal's character grid, measured — for the grid register
+   * (Flourish.GRID_EFFECTS): effects that paint INTO the text's own cells and
+   * are built out of the characters already on screen.
+   *
+   * Same division of labour as wordAnchors and letterSources: the renderer
+   * owns the text so the renderer measures, and the engine gets numbers. The
+   * unit here is the RUN — a maximal non-space slice of one text node. Runs
+   * are the cheap middle ground the other two lack: one Range rect per run
+   * (a few hundred reads for a full screen, the order lightning already
+   * pays), and because the font is monospace, every character inside a run
+   * sits at left + k*cellW exactly. Per-character rects would cost thousands
+   * of reads; per-node rects can't see line wraps. Runs rarely wrap, and the
+   * ones that do are detected by their rect being taller than a line and
+   * skipped.
+   *
+   * All coordinates are viewport coordinates AT SNAPSHOT TIME. The transcript
+   * keeps scrolling underneath (same problem salvage has), so grid scenes
+   * also get scrollDrift and subtract the delta per frame.
+   */
+  function measureRuns() {
+    const sr = screen.getBoundingClientRect();
+    const ref = transcript.querySelector('.line.assistant .body')
+      || transcript.querySelector('.line .body') || transcript;
+    const cs = getComputedStyle(ref);
+    const px = parseFloat(cs.fontSize) || 15;
+    const lineH = parseFloat(cs.lineHeight) || px * 1.5;
+    const runs = [];
+    const walk = document.createTreeWalker(transcript, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement && n.parentElement.closest('.who'))
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes = [];
+    while (walk.nextNode()) nodes.push(walk.currentNode);
+    const range = document.createRange();
+    const sized = new Map();   // host element -> is it at the grid's font size?
+    for (const n of nodes) {
+      const host = n.parentElement;
+      if (!host) continue;
+      // Tool lines and labels render smaller (13px) and would land between
+      // columns — the grid is the PROSE grid, so only prose-sized text is in
+      // it. One computed style per host, cached: nodes share hosts heavily.
+      let ok = sized.get(host);
+      if (ok === undefined) {
+        ok = Math.abs(parseFloat(getComputedStyle(host).fontSize) - px) < 0.5;
+        sized.set(host, ok);
+      }
+      if (!ok) continue;
+      const hr = host.getBoundingClientRect();
+      if (!hr.width || hr.bottom < sr.top || hr.top > sr.bottom) continue;
+      const text = n.nodeValue;
+      const re = /\S+/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        range.setStart(n, m.index);
+        range.setEnd(n, m.index + m[0].length);
+        const r = range.getBoundingClientRect();
+        if (!r.width || r.bottom < sr.top || r.top > sr.bottom) continue;
+        if (r.height > lineH * 1.6) continue;   // wrapped mid-run: not one row
+        runs.push({ x: r.left, y: r.top, w: r.width, h: r.height, text: m[0] });
+        if (runs.length >= 900) break;
+      }
+      if (runs.length >= 900) break;
+    }
+    return { runs, sr, px, lineH, font: cs.fontFamily };
+  }
+
+  function gridSnapshot() {
+    const { runs, sr, px, lineH, font } = measureRuns();
+    // The advance width, measured off the longest runs on screen rather than
+    // assumed from the font size — the one lesson every scene here has paid
+    // for once. Median, not mean: a run straddling a styled span boundary
+    // measures fractionally wide and would drag an average.
+    const ws = runs.filter((r) => r.text.length >= 3)
+      .map((r) => r.w / r.text.length).sort((a, b) => a - b);
+    const cellW = ws.length ? ws[ws.length >> 1] : px * 0.6;
+    // The height a run's rect actually has — the engine derives its canvas
+    // baseline from this rather than guessing which box model Range rects use.
+    const hs = runs.map((r) => r.h).sort((a, b) => a - b);
+    const rh = hs.length ? hs[hs.length >> 1] : lineH;
+    const left = sr.left, top = sr.top;
+    const cells = new Map();
+    for (const run of runs) {
+      const row = Math.round((run.y - top) / lineH);
+      const col = Math.round((run.x - left) / cellW);
+      for (let k = 0; k < run.text.length; k++) {
+        // True position rides along: paint the real character where it really
+        // is, not where the uniform grid thinks its row ought to sit — the
+        // 10px paragraph margins mean the two drift apart down the page.
+        cells.set((row + 0) * 4096 + col + k,
+          { ch: run.text[k], x: run.x + k * cellW, y: run.y });
+      }
+    }
+    const bg = getComputedStyle(document.body).backgroundColor;
+    return {
+      px, lineH, font, cellW, rh, left, top,
+      w: sr.width, h: sr.height,
+      cols: Math.max(1, Math.floor(sr.width / cellW)),
+      rows: Math.max(1, Math.floor(sr.height / lineH)),
+      cells, runs,
+      bg: (!bg || bg === 'rgba(0, 0, 0, 0)') ? 'rgb(5, 7, 10)' : bg,
+    };
+  }
+
+  /*
+   * The lines of text as PLATFORMS — what the cat stands on. One segment per
+   * stretch of prose on a row; gaps wider than a couple of cells split the
+   * row into separate ledges, so the end of a paragraph is a real edge to
+   * fall off. y is the top of the text, measured, not derived.
+   */
+  function linePlatforms() {
+    const { runs, px } = measureRuns();
+    const cellW = px * 0.6;
+    const byRow = new Map();
+    for (const run of runs) {
+      const key = Math.round(run.y / 4) * 4;   // cluster tops within ~4px
+      let list = byRow.get(key);
+      if (!list) { list = []; byRow.set(key, list); }
+      list.push(run);
+    }
+    const plats = [];
+    for (const list of byRow.values()) {
+      list.sort((a, b) => a.x - b.x);
+      let cur = null;
+      for (const run of list) {
+        if (cur && run.x - (cur.x1) <= cellW * 2.5) {
+          cur.x1 = Math.max(cur.x1, run.x + run.w);
+        } else {
+          cur = { x0: run.x, x1: run.x + run.w, y: run.y };
+          plats.push(cur);
+        }
+      }
+    }
+    plats.sort((a, b) => a.y - b.y || a.x0 - b.x0);
+    return plats;
+  }
+
+  /*
    * Claim each word a bolt is about to hit, NOW, while its offsets are still
    * true.
    *
@@ -562,6 +699,11 @@
   window.Flourish.igniteWord = igniteWord;
   window.Flourish.letterSources = letterSources;
   window.Flourish.letterAt = letterAt;
+  // The grid register's inputs, for the same reason as the anchors above: the
+  // shot harnesses must fire grid effects the way applyEvents does, or they
+  // photograph a blank frame and call it the effect.
+  window.Flourish.gridSnapshot = gridSnapshot;
+  window.Flourish.linePlatforms = linePlatforms;
   // Salvage measures the transcript once and then flies for up to two seconds,
   // while the typewriter keeps appending and the scroll spring keeps chasing
   // it. Every coordinate it holds is a viewport coordinate of text that is
@@ -609,6 +751,17 @@
           const anchors = lineStrikeTargets();
           o.anchors = anchors;
           o.onStrike = (i) => igniteWord(anchors[i]);
+        }
+        if (GRID_EFFECTS.has(ev.name) || window.Flourish.ASCII_EFFECTS.has(ev.name)) {
+          // The grid register: measured here, painted there. A GRID_EFFECTS
+          // name fired without this draws nothing at all, on purpose — see
+          // GRID_EFFECTS in flourish.js for why blank beats fallback. The
+          // older ASCII panes take the same snapshot as an upgrade: with it
+          // they snap to the text's rows and columns and wear its face; bare,
+          // they keep their pre-grid floating path.
+          o.grid = gridSnapshot();
+          o.scrollY = window.Flourish.scrollDrift;
+          if (ev.name === 'cat') o.platforms = linePlatforms;
         }
         effects.fire(ev.name, p.x, p.y, o);
       }

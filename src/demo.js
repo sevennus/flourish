@@ -46,6 +46,13 @@ const SHOWCASE =
   // rob.
   "{{fx:salvage}}This sentence was assembled out of letters already on this screen{{/fx:salvage}}, " +
   "which is the one effect here that needs something to have been said first. {{fx:constellation}}\n\n" +
+  // The grid register also robs the page — it needs the paragraphs above to
+  // exist, so like salvage it sits late. One scene only: the demo is a reel,
+  // not a screensaver, and plasma is the one that shows the trick (the prose
+  // itself recolouring) in a single beat.
+  "And newest of all, the grid: effects that paint themselves INTO these very " +
+  "characters — a skull that chomps, a tumbling wireframe, a literal firewall, " +
+  "a small cat that walks along the lines of text — and this: {{fx:plasma}}\n\n" +
   "Every one of those was written into my reply by the {{fx:wave}}flourish protocol{{/fx:wave}} — " +
   "the same channel real Claude Code uses over SSH. The terminal adds its own on top: `inline code`, " +
   "**bold**, and numbers like 16000 highlight themselves, and every tool call paints its own shape. " +
