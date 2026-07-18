@@ -51,6 +51,19 @@
   const FIRE = PALETTES.ember;
   const ICE = PALETTES.ice;
 
+  // Element palettes for the elemental set. Hex, because every particle colour
+  // goes through glowSprite/_rgb, which parse hex — an hsl() string here would
+  // silently draw nothing.
+  const EL = {
+    smoke: ['#b9bfc6', '#8c9298', '#d7dbe0', '#6b7075'],
+    acid: ['#c6ff3a', '#8fe000', '#e8ff8a', '#5fae00'],
+    sand: ['#e6cfa0', '#c9a86a', '#f0e2c0', '#a8843f'],
+    venom: ['#c6ff3a', '#b47cff', '#8fe000', '#7a5cff'],
+    elec: ['#ffffff', '#cfe6ff', '#8fd8ff', '#b9a8ff'],
+    water: ['#dff3ff', '#8fd8ff', '#37b6ff', '#ffffff'],
+    lava: ['#ffd27a', '#ff9d3c', '#ff5c2a', '#c1301a'],
+  };
+
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
   const chance = (p) => Math.random() < p;
@@ -141,6 +154,11 @@
     snake: A.planSnake, invaders: A.planInvaders, pacman: A.planPacman,
     ufo: A.planUfo, blackhole: A.planBlackhole, life: A.planLife,
     melt: A.planMelt, quake: A.planQuake, dvd: A.planDvd, aquarium: A.planAquarium,
+    ignite: A.planIgnite, frostbite: A.planFrostbite, corrode: A.planCorrode,
+    electrify: A.planElectrify, overgrow: A.planOvergrow, rust: A.planRust,
+    flood: A.planFlood, petrify: A.planPetrify, smokescreen: A.planSmokescreen,
+    glaciate: A.planGlaciate, magma: A.planMagma, windshear: A.planWindshear,
+    thunderhead: A.planThunderhead, sandbury: A.planSandbury, spores: A.planSpores,
   };
 
   // The terminal's own stack, so a scene sits in the same face as the prose
@@ -250,6 +268,21 @@
         case 'grid': this._grid(o); break;
         case 'circuit': this._circuit(o); break;
         case 'tracer': this._tracer(x, y, o); break;
+        case 'firebomb': this._firebomb(x, y, o); break;
+        case 'napalm': this._napalm(x, y, o); break;
+        case 'blizzard': this._blizzard(o); break;
+        case 'electricity': this._electricity(x, y, o); break;
+        case 'smoke': this._smoke(x, y, o); break;
+        case 'lava': this._lava(x, y, o); break;
+        case 'hail': this._hail(o); break;
+        case 'steam': this._steam(x, y, o); break;
+        case 'acid': this._acid(x, y, o); break;
+        case 'sandstorm': this._sandstorm(o); break;
+        case 'cinders': this._cinders(o); break;
+        case 'shockwave': this._shockwave(x, y, o); break;
+        case 'whirlwind': this._whirlwind(x, y, o); break;
+        case 'geyser': this._geyser(x, y, o); break;
+        case 'venom': this._venom(x, y, o); break;
         default:
           // The ASCII register dispatches off one set rather than ten cases, so
           // an eleventh scene costs no line here. Anything else still falls
@@ -1126,6 +1159,236 @@
       this.tracers = { heads, life: 0, max: rand(2200, 3200) };
     }
 
+    // ---- elemental particle effects ----
+    //
+    // A themed set built on the particle engine. Random bursts like spark/nova,
+    // so there is no seeded planner — the variety is in the physics. Colours are
+    // hex (glowSprite parses hex); weather-scale ones ignore x/y and fill the
+    // screen, point-scale ones fire at the caret.
+
+    _firebomb(x, y, o) {
+      const s = o.scale;
+      this._flash('rgba(255,150,60,0.30)');
+      this.rings.push({ x, y, r: 6, life: 0, max: 620, grow: 3.2 * s, color: '255,180,80', width: 4 });
+      this.rings.push({ x, y, r: 2, life: 0, max: 820, grow: 2.2 * s, color: '255,92,42', width: 2, delay: 70 });
+      this.emit(x, y, { n: Math.round(70 * s), colors: FIRE, speedMin: 2, speedMax: 9,
+        lifeMin: 500, lifeMax: 1100, sizeMin: 1.5, sizeMax: 3.6, grav: -0.01, drag: 0.96, halo: 12 });
+      this.emit(x, y, { n: Math.round(34 * s), colors: ['#ffd27a', '#ff9d3c', '#ff5c2a'], speedMin: 0.5, speedMax: 3,
+        lifeMin: 900, lifeMax: 1800, sizeMin: 1, sizeMax: 2.4, grav: -0.02, drag: 0.99, sway: 0.03, twinkle: true, halo: 10 });
+    }
+
+    // Sticky fire, thrown out on arcs that fall under gravity and burn where
+    // they land — the clinging is the whole difference from firebomb.
+    _napalm(x, y, o) {
+      const s = o.scale;
+      const n = Math.round(22 * s);
+      for (let i = 0; i < n; i++) {
+        const a = -Math.PI / 2 + rand(-1.1, 1.1);
+        const sp = rand(3, 8) * s;
+        this.particles.push({
+          x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          life: 0, max: rand(900, 1600), size: rand(2, 4) * s,
+          color: pick(['#ff9d3c', '#ff5c2a', '#ffd27a']), grav: 0.16, drag: 0.99, shape: 'dot', halo: 12,
+        });
+      }
+      this.emit(x, y + 6, { n: Math.round(30 * s), colors: FIRE, angle: -Math.PI / 2, spread: 1.2,
+        speedMin: 0.4, speedMax: 2.4, lifeMin: 700, lifeMax: 1500, sizeMin: 1.5, sizeMax: 3,
+        grav: -0.02, drag: 0.98, sway: 0.04, twinkle: true, halo: 10 });
+    }
+
+    _blizzard(o) {
+      const s = o.scale;
+      const wind = rand(2.5, 6) * (Math.random() < 0.5 ? 1 : -1);
+      const n = Math.round(420 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: rand(-140, this.w + 140), y: rand(-this.h, -10),
+          vx: wind + rand(-1.2, 1.2), vy: rand(5, 12),
+          life: 0, max: rand(1400, 2600), size: rand(0.8, 2.4) * s,
+          color: pick(ICE), grav: 0.006, drag: 0.999, shape: 'dot',
+          sway: rand(0.04, 0.12), swayPhase: rand(0, TAU), twinkle: true, delay: rand(0, 800),
+        });
+      }
+    }
+
+    // Short, branching arcs that crackle out from the point and die fast. Each
+    // segment is a streak pointing back along its own step.
+    _electricity(x, y, o) {
+      const s = o.scale;
+      const bolts = 5 + ((Math.random() * 4) | 0);
+      for (let b = 0; b < bolts; b++) {
+        let px = x, py = y, ang = rand(0, TAU);
+        const segs = 5 + ((Math.random() * 5) | 0);
+        for (let k = 0; k < segs; k++) {
+          ang += rand(-0.9, 0.9);
+          const len = rand(10, 26) * s;
+          const nx = px + Math.cos(ang) * len, ny = py + Math.sin(ang) * len;
+          this.particles.push({
+            x: nx, y: ny, vx: (nx - px) * 0.02, vy: (ny - py) * 0.02,
+            life: 0, max: rand(120, 320), size: rand(1, 2) * s,
+            color: pick(EL.elec), shape: 'streak', len, halo: 8, delay: b * 24 + k * 10,
+          });
+          px = nx; py = ny;
+        }
+      }
+      this._flash('rgba(180,210,255,0.14)');
+    }
+
+    _smoke(x, y, o) {
+      const s = o.scale;
+      const n = Math.round(46 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: x + rand(-14, 14) * s, y: y + rand(-4, 8),
+          vx: rand(-0.4, 0.4), vy: rand(-1.8, -0.7),
+          life: 0, max: rand(1500, 2800), size: rand(6, 15) * s,
+          color: pick(EL.smoke), grav: -0.006, drag: 0.992, shape: 'dot', halo: 5,
+          sway: rand(0.01, 0.03), swayPhase: rand(0, TAU), delay: i * rand(8, 36),
+        });
+      }
+    }
+
+    _lava(x, y, o) {
+      const s = o.scale;
+      const n = Math.round(26 * s);
+      for (let i = 0; i < n; i++) {
+        const a = -Math.PI / 2 + rand(-0.7, 0.7);
+        const sp = rand(1.5, 5.5) * s;
+        this.particles.push({
+          x: x + rand(-10, 10), y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          life: 0, max: rand(700, 1500), size: rand(2.5, 5) * s,
+          color: pick(EL.lava), grav: 0.12, drag: 0.99, shape: 'dot', halo: 12, twinkle: true, delay: i * rand(0, 60),
+        });
+      }
+      this.emit(x, y, { n: Math.round(10 * s), colors: EL.smoke, speedMin: 0.3, speedMax: 1.4,
+        lifeMin: 900, lifeMax: 1600, sizeMin: 5, sizeMax: 10, grav: -0.01, halo: 5 });
+    }
+
+    _hail(o) {
+      const s = o.scale;
+      const wind = rand(-2, 2);
+      const n = Math.round(180 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: rand(-60, this.w + 60), y: rand(-this.h, -10), vx: wind, vy: rand(13, 22),
+          life: 0, max: rand(900, 1600), size: rand(1.6, 3.2) * s,
+          color: pick(['#ffffff', '#dff3ff', '#bfe6ff']), grav: 0.08, drag: 1, shape: 'dot', halo: 4, delay: rand(0, 500),
+        });
+      }
+    }
+
+    _steam(x, y, o) {
+      const s = o.scale;
+      const n = Math.round(40 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: x + rand(-8, 8), y: y + rand(-4, 4), vx: rand(-0.6, 0.6), vy: rand(-3.4, -1.6),
+          life: 0, max: rand(700, 1500), size: rand(3, 9) * s,
+          color: pick(['#ffffff', '#e8f4ff', '#cfe6ff']), grav: -0.01, drag: 0.985, shape: 'dot', halo: 5,
+          sway: rand(0.02, 0.06), swayPhase: rand(0, TAU), delay: i * rand(4, 22),
+        });
+      }
+    }
+
+    _acid(x, y, o) {
+      const s = o.scale;
+      const n = Math.round(30 * s);
+      for (let i = 0; i < n; i++) {
+        const a = rand(0, TAU), sp = rand(1, 6) * s;
+        this.particles.push({
+          x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1,
+          life: 0, max: rand(600, 1300), size: rand(1.5, 3.4) * s,
+          color: pick(EL.acid), grav: 0.14, drag: 0.98, shape: 'dot', halo: 8, twinkle: true,
+        });
+      }
+      this.emit(x, y, { n: Math.round(20 * s), colors: EL.acid, speedMin: 0.3, speedMax: 1.6,
+        lifeMin: 500, lifeMax: 1100, sizeMin: 0.8, sizeMax: 1.8, grav: 0.02, twinkle: true, halo: 5 });
+    }
+
+    _sandstorm(o) {
+      const s = o.scale;
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      const n = Math.round(360 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: dir > 0 ? rand(-140, -10) : rand(this.w + 10, this.w + 140), y: rand(0, this.h),
+          vx: dir * rand(9, 20), vy: rand(-1.2, 1.2),
+          life: 0, max: rand(900, 1700), size: rand(1, 3) * s,
+          color: pick(EL.sand), grav: 0, drag: 1, shape: 'streak', len: rand(8, 20),
+          sway: rand(0.01, 0.04), swayPhase: rand(0, TAU), delay: rand(0, 700),
+        });
+      }
+    }
+
+    // Glowing cinders drifting DOWN — the counterpart to embers, which rise.
+    _cinders(o) {
+      const s = o.scale;
+      const n = Math.round(120 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: rand(0, this.w), y: rand(-this.h, -10), vx: rand(-0.6, 0.6), vy: rand(0.6, 2.2),
+          life: 0, max: rand(1800, 3200), size: rand(1, 2.6) * s,
+          color: pick(['#ffd27a', '#ff9d3c', '#ff5c2a']), grav: 0.004, drag: 0.999, shape: 'dot', halo: 10,
+          twinkle: true, sway: rand(0.02, 0.07), swayPhase: rand(0, TAU), delay: rand(0, 1000),
+        });
+      }
+    }
+
+    _shockwave(x, y, o) {
+      const s = o.scale;
+      this._flash('rgba(220,230,255,0.16)');
+      for (let k = 0; k < 3; k++) {
+        this.rings.push({ x, y, r: 4, life: 0, max: 700 + k * 160, grow: (4.5 - k * 0.9) * s,
+          color: k ? '200,214,235' : '255,255,255', width: 4 - k, delay: k * 60 });
+      }
+      this.emit(x, y, { n: Math.round(26 * s), colors: ['#ffffff', '#c8ccd0', '#9aa0a6'], speedMin: 3, speedMax: 9,
+        lifeMin: 300, lifeMax: 700, sizeMin: 1, sizeMax: 2.2, grav: 0, drag: 0.94, halo: 4 });
+    }
+
+    // A flat swirl of debris orbiting the point — polar mode, so it reads as a
+    // whirl seen from above rather than another radial burst.
+    _whirlwind(x, y, o) {
+      const s = o.scale;
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      const n = Math.round(70 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          mode: 'polar', cx: x, cy: y, ang: rand(0, TAU), rad: rand(6, 62) * s,
+          vang: dir * rand(0.06, 0.14), vrad: rand(-0.1, 0.05),
+          x, y, life: 0, max: rand(900, 1800), size: rand(1, 3) * s,
+          color: pick(EL.sand), shape: 'dot', halo: 5, twinkle: true, delay: i * rand(0, 30),
+        });
+      }
+    }
+
+    _geyser(x, y, o) {
+      const s = o.scale;
+      const n = Math.round(80 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: x + rand(-6, 6), y, vx: rand(-1.4, 1.4), vy: rand(-16, -8) * s,
+          life: 0, max: rand(900, 1600), size: rand(1.4, 3.2) * s,
+          color: pick(EL.water), grav: 0.32, drag: 1, shape: 'dot', halo: 6, twinkle: true, delay: i * rand(0, 60),
+        });
+      }
+      this.emit(x, y, { n: Math.round(20 * s), colors: ['#ffffff', '#e8f4ff'], speedMin: 1, speedMax: 4,
+        angle: -Math.PI / 2, spread: 0.5, lifeMin: 500, lifeMax: 1000, sizeMin: 2, sizeMax: 5, grav: -0.01, halo: 5 });
+    }
+
+    // A toxic cloud that SINKS and pools — down, where fire and smoke go up.
+    _venom(x, y, o) {
+      const s = o.scale;
+      const n = Math.round(48 * s);
+      for (let i = 0; i < n; i++) {
+        this.particles.push({
+          x: x + rand(-20, 20) * s, y: y + rand(-8, 8), vx: rand(-0.6, 0.6), vy: rand(0.3, 1.6),
+          life: 0, max: rand(1400, 2600), size: rand(4, 11) * s,
+          color: pick(EL.venom), grav: 0.006, drag: 0.99, shape: 'dot', halo: 6,
+          sway: rand(0.02, 0.05), swayPhase: rand(0, TAU), twinkle: true, delay: i * rand(8, 34),
+        });
+      }
+    }
+
     // ---- ASCII scenes ----
     //
     // Ten effects, one array, one draw pass. Each is a machine talking to
@@ -1674,6 +1937,64 @@
 
     _cellKey(c, r) { return r * 4096 + c; }
 
+    // ---- elemental grid effects (volume III) ----
+    //
+    // A front sweeps across the on-screen prose and transmutes it. The shared
+    // machinery: give every occupied cell an arrival time `at` from a distance
+    // function (radial from the caret, inward from the edges, directional, a
+    // rising waterline), then in the draw transform each cell once the front
+    // reaches it — recolour it, swap its glyph, eat it into a hole. As always,
+    // it's all canvas over untouched DOM, so the prose is whole when it fades.
+
+    // Lerp two [r,g,b] arrays to an "r,g,b" string.
+    _lerp(a, b, t) {
+      t = Math.max(0, Math.min(1, t));
+      return Math.round(a[0] + (b[0] - a[0]) * t) + ',' +
+        Math.round(a[1] + (b[1] - a[1]) * t) + ',' +
+        Math.round(a[2] + (b[2] - a[2]) * t);
+    }
+
+    // Build a spreading-front scene. distFn(c, G) returns a distance in cells;
+    // the front advances at plan.speed cells per ~16ms. Returns the scene (with
+    // per-cell `at` set) or null on a thin grid.
+    _frontScene(kind, o, distFn, max) {
+      const G = o.grid;
+      if (!G || !ASCII_PLAN[kind]) return null;
+      const plan = ASCII_PLAN[kind]();
+      if (!plan) return null;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (cells.length < 6) return null;
+      let maxD = 1;
+      for (const c of cells) { c.d = distFn(c, G); if (c.d > maxD) maxD = c.d; }
+      const per = 16 / (plan.speed || 1);
+      for (const c of cells) c.at = c.d * per + rand(0, 50);
+      const settle = plan.settle || 600;
+      return this._scene(kind, o, Object.assign(this._gridExtra(o), {
+        plan, cells, settle, maxD,
+        max: max || (maxD * per + settle + 800),
+      }));
+    }
+
+    // Draw a front scene. theme(c, q) -> { glyph, color } where q is 0..1 local
+    // progress since the front reached that cell. Cells the front hasn't reached
+    // are left to the DOM.
+    _drawFront(ctx, S, fade, theme) {
+      const G = S.grid;
+      ctx.font = this._gridFont(G);
+      ctx.textBaseline = 'alphabetic';
+      const bg = this._bgRgb(G);
+      for (const c of S.cells) {
+        if (S.life < c.at) continue;
+        const q = Math.min(1, (S.life - c.at) / S.settle);
+        ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+        ctx.fillRect(c.x - 1, c.y, G.cellW + 2, (G.rh || G.lineH));
+        const th = theme(c, q);
+        if (!th.glyph || th.glyph === ' ') continue;
+        ctx.fillStyle = 'rgba(' + th.color + ',' + fade + ')';
+        ctx.fillText(th.glyph, c.x, c.y + S.vOff);
+      }
+    }
+
     // snake — seeks the nearest uneaten character, one grid cell per step, and
     // grows each time it swallows one.
     _snake(x, y, o) {
@@ -2033,6 +2354,105 @@
       }
       for (const b of S.bubbles) b.y -= b.v * dt;
       S.bubbles = S.bubbles.filter((b) => b.y > G.top);
+    }
+
+    // --- volume III: elemental grid fires ---
+    // Front-based: a distance function decides arrival order; the theme lives
+    // in the draw branch.
+    _ignite(x, y, o) { const G = o.grid; if (!G) return; this._frontScene('ignite', o, (c) => Math.hypot(c.x - x, c.y - y) / G.cellW); }
+    _corrode(x, y, o) { const G = o.grid; if (!G) return; this._frontScene('corrode', o, (c) => Math.hypot(c.x - x, c.y - y) / G.cellW); }
+    _petrify(x, y, o) { const G = o.grid; if (!G) return; this._frontScene('petrify', o, (c) => Math.hypot(c.x - x, c.y - y) / G.cellW); }
+    _magma(x, y, o) { const G = o.grid; if (!G) return; this._frontScene('magma', o, (c) => Math.hypot(c.x - x, c.y - y) / G.cellW); }
+    _spores(x, y, o) { const G = o.grid; if (!G) return; this._frontScene('spores', o, (c) => Math.hypot(c.x - x, c.y - y) / G.cellW); }
+    _frostbite(x, y, o) { const G = o.grid; if (!G) return; this._frontScene('frostbite', o, (c) => Math.min(c.x - G.left, G.left + G.w - c.x, c.y - G.top, G.top + G.h - c.y) / G.cellW); }
+    _overgrow(x, y, o) { const G = o.grid; if (!G) return; this._frontScene('overgrow', o, (c) => (G.top + G.h - c.y) / G.lineH); }
+    _rust(x, y, o) { const G = o.grid; if (!G) return; const dir = Math.random() < 0.5 ? 1 : -1; this._frontScene('rust', o, (c) => (dir > 0 ? c.x - G.left : G.left + G.w - c.x) / G.cellW); }
+    _glaciate(x, y, o) { const G = o.grid; if (!G) return; const dir = Math.random() < 0.5 ? 1 : -1; this._frontScene('glaciate', o, (c) => (dir > 0 ? c.x - G.left : G.left + G.w - c.x) / G.cellW); }
+
+    // electrify — a lightning arc random-walks from character to character,
+    // each struck letter flaring white then cooling to blue.
+    _electrify(x, y, o) {
+      const G = o.grid; if (!G || !ASCII_PLAN.electrify) return;
+      const plan = ASCII_PLAN.electrify();
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (cells.length < 8) return;
+      const used = new Set();
+      let cur = cells.reduce((b, c) => (Math.hypot(c.x - x, c.y - y) < Math.hypot(b.x - x, b.y - y) ? c : b), cells[0]);
+      const path = [];
+      const N = Math.min(44, cells.length);
+      for (let i = 0; i < N && cur; i++) {
+        used.add(cur); path.push(cur);
+        let best = null, bd = 1e9;
+        for (const c of cells) { if (used.has(c)) continue; const d = Math.hypot(c.x - cur.x, c.y - cur.y) * (0.7 + Math.random() * 0.7); if (d < bd) { bd = d; best = c; } }
+        cur = best;
+      }
+      path.forEach((c, i) => { c.at = i * plan.stepMs; });
+      this._scene('electrify', o, Object.assign(this._gridExtra(o), { plan, path, max: N * plan.stepMs + plan.flare + 700 }));
+    }
+
+    // flood — a waterline rises from the bottom; the prose it covers goes wavy
+    // and blue, a surface of ~ riding on top.
+    _flood(x, y, o) {
+      const G = o.grid; if (!G || !ASCII_PLAN.flood) return;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (cells.length < 6) return;
+      this._scene('flood', o, Object.assign(this._gridExtra(o), { plan: ASCII_PLAN.flood(), cells, max: 4600 }));
+      void x; void y;
+    }
+
+    // smokescreen — a bank of smoke wells up and thins the text out.
+    _smokescreen(x, y, o) {
+      const G = o.grid; if (!G || !ASCII_PLAN.smokescreen) return;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (cells.length < 6) return;
+      this._scene('smokescreen', o, Object.assign(this._gridExtra(o), { plan: ASCII_PLAN.smokescreen(), cells, max: 4400 }));
+      void x; void y;
+    }
+
+    // windshear — a gust blows the characters sideways off their lines, then
+    // eases them home.
+    _windshear(x, y, o) {
+      const G = o.grid; if (!G) return;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (!cells.length) return;
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      const parts = cells.map((c) => ({ ch: c.ch, x0: c.x, y: c.y, amp: (60 + rand(0, 240)) * dir, delay: rand(0, 400) }));
+      this._scene('windshear', o, Object.assign(this._gridExtra(o), { parts, dir, max: 2800 }));
+      void x; void y;
+    }
+
+    // thunderhead — a storm cloud forms over the top and throws bolts down into
+    // the lines, lighting each struck row white.
+    _thunderhead(x, y, o) {
+      const G = o.grid; if (!G || !ASCII_PLAN.thunderhead) return;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (cells.length < 6) return;
+      const rowsMap = {};
+      for (const c of cells) { const rk = Math.round((c.y - G.top) / G.lineH); (rowsMap[rk] = rowsMap[rk] || []).push(c); }
+      this._scene('thunderhead', o, Object.assign(this._gridExtra(o), {
+        // rowKeys, NOT rows: a numeric `rows` field collides with the banner's
+        // string `rows` in the probe's reveal-timing oracle (S.rows[0].length),
+        // which made this scene sample at t=0 and never reap. Named apart.
+        plan: ASCII_PLAN.thunderhead(), cells, rowsMap, rowKeys: Object.keys(rowsMap).map(Number), bolts: [], acc: 0, max: 4600,
+      }));
+      void x; void y;
+    }
+    _stepThunderhead(S, dt) {
+      S.acc += dt;
+      if (S.acc >= S.plan.strikeMs && S.rowKeys.length) {
+        S.acc = 0;
+        S.bolts.push({ row: S.rowKeys[(Math.random() * S.rowKeys.length) | 0], col: Math.random(), at: S.life });
+      }
+      S.bolts = S.bolts.filter((b) => S.life - b.at < 700);
+    }
+
+    // sandbury — a dune rises and buries the text under drifting sand.
+    _sandbury(x, y, o) {
+      const G = o.grid; if (!G) return;
+      const cells = this._cellList(G).filter((c) => c.ch && c.ch.trim());
+      if (!cells.length) return;
+      this._scene('sandbury', o, Object.assign(this._gridExtra(o), { cells, dir: Math.random() < 0.5 ? 1 : -1, max: 4600 }));
+      void x; void y;
     }
 
     _drawAscii(ctx, S) {
@@ -2631,6 +3051,176 @@
         }
         ctx.fillStyle = 'rgba(150,220,255,' + fade * 0.7 + ')';
         for (const b of S.bubbles) ctx.fillText(b.r, b.x, b.y + S.vOff);
+      } else if (S.kind === 'ignite') {
+        this._drawFront(ctx, S, fade, (c, q) => ({ glyph: c.ch,
+          color: q < 0.28 ? this._lerp([255, 244, 190], [255, 120, 40], q / 0.28)
+            : this._lerp([255, 120, 40], [74, 64, 56], (q - 0.28) / 0.72) }));
+      } else if (S.kind === 'frostbite') {
+        this._drawFront(ctx, S, fade, (c, q) => ({ glyph: c.ch,
+          color: q < 0.2 ? '255,255,255' : this._lerp([223, 243, 255], [70, 150, 210], (q - 0.2) / 0.8) }));
+      } else if (S.kind === 'corrode') {
+        this._drawFront(ctx, S, fade, (c, q) => ({
+          glyph: q > 0.82 ? ' ' : q > 0.5 ? '.' : c.ch,
+          color: this._lerp([150, 224, 58], [70, 120, 20], q) }));
+      } else if (S.kind === 'petrify') {
+        this._drawFront(ctx, S, fade, (c, q) => ({ glyph: c.ch,
+          color: q < 0.2 ? this._lerp([205, 205, 210], [140, 140, 150], q / 0.2) : '128,128,138' }));
+      } else if (S.kind === 'rust') {
+        this._drawFront(ctx, S, fade, (c, q) => ({
+          glyph: q > 0.85 && ((c.c * 7 + c.r * 3) % 10 === 0) ? '.' : c.ch,
+          color: q < 0.3 ? this._lerp([210, 180, 150], [196, 120, 60], q / 0.3)
+            : this._lerp([196, 120, 60], [120, 66, 40], (q - 0.3) / 0.7) }));
+      } else if (S.kind === 'glaciate') {
+        this._drawFront(ctx, S, fade, (c, q) => ({ glyph: c.ch,
+          color: q < 0.15 ? '255,255,255' : this._lerp([200, 232, 255], [120, 180, 235], (q - 0.15) / 0.85) }));
+      } else if (S.kind === 'overgrow') {
+        const VINE = '%&*+';
+        this._drawFront(ctx, S, fade, (c, q) => ({
+          glyph: q > 0.5 && ((c.c + c.r) % 3 === 0) ? VINE[(c.c + c.r) % VINE.length] : c.ch,
+          color: this._lerp([120, 210, 90], [40, 150, 60], q) }));
+      } else if (S.kind === 'magma') {
+        this._drawFront(ctx, S, fade, (c, q) => ({ glyph: c.ch,
+          color: q < 0.3 ? this._lerp([255, 220, 120], [255, 90, 30], q / 0.3)
+            : this._lerp([255, 90, 30], [70, 42, 40], (q - 0.3) / 0.7) }));
+      } else if (S.kind === 'spores') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G); ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        for (const c of S.cells) {
+          if (S.life < c.at) continue;
+          const q = Math.min(1, (S.life - c.at) / S.settle);
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(c.x - 1, c.y, G.cellW + 2, (G.rh || G.lineH));
+          ctx.fillStyle = 'rgba(' + this._lerp([150, 224, 58], [90, 170, 40], q) + ',' + fade + ')';
+          ctx.fillText(c.ch, c.x, c.y + S.vOff);
+          if (q < 0.6) {
+            ctx.fillStyle = 'rgba(180,240,90,' + (fade * (0.5 - q * 0.7)) + ')';
+            ctx.fillText('o', c.x, c.y + S.vOff - q * G.lineH * 1.6);
+          }
+        }
+      } else if (S.kind === 'electrify') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G); ctx.textBaseline = 'alphabetic';
+        const hot = [255, 255, 255], cool = [143, 216, 255];
+        for (let i = 0; i < S.path.length; i++) {
+          const c = S.path[i];
+          if (S.life < c.at) continue;
+          const q = Math.min(1, (S.life - c.at) / S.plan.flare);
+          ctx.fillStyle = 'rgba(' + this._lerp(hot, cool, q) + ',' + (fade * (1 - q * 0.7)) + ')';
+          ctx.fillText(c.ch, c.x, c.y + S.vOff);
+          if (i > 0) {
+            const age = S.life - c.at;
+            if (age < 170) {
+              const p = S.path[i - 1];
+              ctx.strokeStyle = 'rgba(' + this._lerp(hot, cool, 0.3) + ',' + (fade * (1 - age / 170)) + ')';
+              ctx.lineWidth = 1.5; ctx.beginPath();
+              ctx.moveTo(p.x + G.cellW / 2, p.y + S.vOff - G.lineH * 0.3);
+              ctx.lineTo(c.x + G.cellW / 2, c.y + S.vOff - G.lineH * 0.3);
+              ctx.stroke();
+            }
+          }
+        }
+      } else if (S.kind === 'flood') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G); ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        let f = Math.min(1, S.life / 2600);
+        if (S.life > S.max - 800) f *= Math.max(0, (S.max - S.life) / 800);
+        const waterY = (G.top + G.h) - f * G.h;
+        const grad = ctx.createLinearGradient(0, waterY, 0, G.top + G.h);
+        grad.addColorStop(0, 'rgba(55,150,210,' + (fade * 0.10) + ')');
+        grad.addColorStop(1, 'rgba(30,90,160,' + (fade * 0.30) + ')');
+        ctx.fillStyle = grad; ctx.fillRect(G.left, waterY, G.w, G.top + G.h - waterY);
+        for (const c of S.cells) {
+          if (c.y < waterY - G.lineH) continue;
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(c.x - 1, c.y, G.cellW + 2, (G.rh || G.lineH));
+          const wob = Math.sin(S.life * 0.004 + c.y * 0.05 + c.x * 0.02) * 2.2;
+          const depth = Math.min(1, (c.y - waterY) / (G.h * 0.5));
+          ctx.fillStyle = 'rgba(' + this._lerp([150, 220, 255], [40, 110, 190], depth) + ',' + fade + ')';
+          ctx.fillText(c.ch, c.x + wob, c.y + S.vOff);
+        }
+        ctx.fillStyle = 'rgba(200,240,255,' + fade + ')';
+        for (let cx = 0; cx < G.cols; cx++) {
+          ctx.fillText('~', G.left + cx * G.cellW, waterY + Math.sin(S.life * 0.005 + cx * 0.5) * 3 + S.vOff);
+        }
+      } else if (S.kind === 'smokescreen') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G); ctx.textBaseline = 'alphabetic';
+        let f = Math.min(1, S.life / 1800);
+        if (S.life > S.max - 900) f *= Math.max(0, (S.max - S.life) / 900);
+        const topY = (G.top + G.h) - f * G.h;
+        ctx.fillStyle = 'rgba(150,155,160,' + (fade * 0.35 * f) + ')';
+        ctx.fillRect(G.left, topY, G.w, G.top + G.h - topY);
+        const SM = '%#*@&';
+        for (const c of S.cells) {
+          if (c.y < topY) continue;
+          const n = Math.sin(c.x * 0.05 + S.life * 0.003) + Math.cos(c.y * 0.06 - S.life * 0.0025);
+          if (n < 0.6) continue;
+          ctx.fillStyle = 'rgba(' + this._lerp([120, 124, 130], [210, 214, 220], (n - 0.6)) + ',' + (fade * 0.85) + ')';
+          ctx.fillText(SM[(c.c + ((S.life * 0.02) | 0)) % SM.length], c.x, c.y + S.vOff);
+        }
+      } else if (S.kind === 'windshear') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G); ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        for (const p of S.parts) {
+          if (S.life < p.delay) continue;
+          const local = Math.min(1, (S.life - p.delay) / (S.max - p.delay));
+          const off = p.amp * Math.sin(Math.min(1, local * 1.3) * Math.PI);
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(p.x0 - 1, p.y, G.cellW + 2, (G.rh || G.lineH));
+          ctx.fillStyle = 'rgba(' + this._lerp([205, 222, 236], [120, 150, 180], Math.min(1, Math.abs(off) / 300)) + ',' + fade + ')';
+          ctx.fillText(p.ch, p.x0 + off, p.y + S.vOff);
+        }
+      } else if (S.kind === 'thunderhead') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G); ctx.textBaseline = 'alphabetic';
+        const CL = '@#%&';
+        for (let cx = 0; cx < G.cols; cx++) {
+          for (let ry = 0; ry < 2; ry++) {
+            const n = Math.sin(cx * 0.3 + S.life * 0.003 + ry) + Math.cos(cx * 0.13 - S.life * 0.004);
+            if (n < 0.2) continue;
+            ctx.fillStyle = 'rgba(' + this._lerp([70, 74, 82], [150, 156, 166], (n - 0.2) / 1.8) + ',' + (fade * 0.85) + ')';
+            ctx.fillText(CL[(cx + ry) % CL.length], G.left + cx * G.cellW, G.top + (ry + 0.9) * G.lineH + S.vOff);
+          }
+        }
+        for (const b of S.bolts) {
+          const age = S.life - b.at, a = fade * Math.max(0, 1 - age / 700);
+          const bx = G.left + b.col * G.w, rowY = G.top + b.row * G.lineH;
+          if (age < 200) {
+            ctx.strokeStyle = 'rgba(210,225,255,' + a + ')'; ctx.lineWidth = 2; ctx.beginPath();
+            let yy = G.top + G.lineH * 1.5, xx = bx;
+            ctx.moveTo(xx, yy);
+            while (yy < rowY) { yy += G.lineH * 0.8; xx += rand(-G.cellW * 2, G.cellW * 2); ctx.lineTo(xx, yy); }
+            ctx.stroke();
+          }
+          const row = S.rowsMap[b.row];
+          if (row) { ctx.fillStyle = 'rgba(220,235,255,' + a + ')'; for (const c of row) ctx.fillText(c.ch, c.x, c.y + S.vOff); }
+        }
+      } else if (S.kind === 'sandbury') {
+        const G = S.grid;
+        ctx.font = this._gridFont(G); ctx.textBaseline = 'alphabetic';
+        const bg = this._bgRgb(G);
+        let f = Math.min(1, S.life / 2800);
+        if (S.life > S.max - 900) f *= Math.max(0, (S.max - S.life) / 900);
+        const duneY = (cx) => (G.top + G.h) - f * G.h + (S.dir > 0 ? -(cx - G.left) * 0.06 : (cx - (G.left + G.w)) * 0.06);
+        // The dune SURFACE, drawn every frame across the width — so the sand is
+        // visibly advancing even before it reaches (short) prose that sits high
+        // up the screen. Without it the scene draws nothing until burial.
+        for (let cx = 0; cx < G.cols; cx++) {
+          const dy = duneY(G.left + cx * G.cellW);
+          if (dy < G.top || dy > G.top + G.h) continue;
+          ctx.fillStyle = 'rgba(' + this._lerp([234, 214, 168], [198, 162, 96], (cx % 5) / 5) + ',' + fade + ')';
+          ctx.fillText(((cx + ((S.life * 0.03) | 0)) % 4 === 0) ? '#' : '~', G.left + cx * G.cellW, dy + S.vOff);
+        }
+        for (const c of S.cells) {
+          if (c.y < duneY(c.x) - G.lineH) continue;
+          ctx.fillStyle = 'rgba(' + bg + ',' + fade + ')';
+          ctx.fillRect(c.x - 1, c.y, G.cellW + 2, (G.rh || G.lineH));
+          ctx.fillStyle = 'rgba(' + this._lerp([230, 208, 160], [168, 132, 63], Math.min(1, (c.y - duneY(c.x)) / (G.h * 0.4))) + ',' + fade + ')';
+          ctx.fillText(pick(['#', '%', ':', '.']), c.x, c.y + S.vOff);
+        }
       } else {
         // The line panes: wardial, sniffer, trace, daemon.
         const C = S.cell;
@@ -2872,6 +3462,7 @@
         else if (S.kind === 'quake') this._stepQuake(S, dt);
         else if (S.kind === 'dvd') this._stepDvd(S, dt);
         else if (S.kind === 'aquarium') this._stepAquarium(S, dt);
+        else if (S.kind === 'thunderhead') this._stepThunderhead(S, dt);
         if (S.kind === 'skull' && A.jawDropAt) {
           const drop = A.jawDropAt(S.life, S.plan.chomps);
           if (S.lastDrop - drop > 0.5) {

@@ -132,6 +132,45 @@ or screensaver bits, and they read best when you DON'T explain the joke:
                     fish swim the lines and bubbles rise — calm, idle, a lull,
                     nobody getting any work done
 
+ELEMENTAL EFFECTS — a themed set of the classical elements. These are big and
+atmospheric; reach for them when the subject is genuinely fire/ice/storm/decay,
+not as everyday punctuation. Some are weather that fills the screen, some fire
+at the caret:
+  {{fx:firebomb}}   a fireball: white-hot flash, blast ring, rising embers — a detonation
+  {{fx:napalm}}     sticky fire thrown out on arcs that fall and cling — spreading fire
+  {{fx:blizzard}}   driving snow across the whole screen — a whiteout, brutal cold
+  {{fx:electricity}} branching arcs crackling out from a point — a live wire, a short
+  {{fx:smoke}}      soft grey plumes billowing up — something smouldering
+  {{fx:lava}}       molten globs bubbling up and falling back — heat from below
+  {{fx:hail}}       hard ice pellets hammering down — a violent squall
+  {{fx:steam}}      fine white vapour hissing upward — pressure released
+  {{fx:acid}}       corrosive green droplets spitting and sizzling — something caustic
+  {{fx:sandstorm}}  a wall of dust driving across the screen — a desert gale
+  {{fx:cinders}}    glowing cinders drifting DOWN — the calm after a fire
+  {{fx:shockwave}}  concentric pressure rings blasting outward — a percussive hit
+  {{fx:whirlwind}}  a swirl of debris orbiting a point — a vortex of wind
+  {{fx:geyser}}     a tall jet of water erupting upward and arcing back — a burst from below
+  {{fx:venom}}      a toxic cloud that SINKS and pools — something poisonous settling
+
+ELEMENTAL GRID EFFECTS — the same elements, but they TRANSMUTE the text on
+screen: a front sweeps across your prose and changes it (and it changes back
+when the effect ends). Like the other grid effects, they need text to work on:
+  {{fx:ignite}}     fire spreads out from the caret and the characters char to ash
+  {{fx:frostbite}}  frost creeps in from the edges; the text crystallises to ice-blue
+  {{fx:corrode}}    acid eats the text — letters pit into dots and then holes
+  {{fx:electrify}}  an arc jumps letter to letter, each struck character flaring white
+  {{fx:overgrow}}   green vines climb the lines, sprouting between the words
+  {{fx:rust}}       the text oxidises across — orange-brown, flaking
+  {{fx:flood}}      a waterline rises and the prose it covers goes wavy and blue
+  {{fx:petrify}}    the text turns to grey stone, spreading from a point
+  {{fx:smokescreen}} smoke wells up and thins the text out behind a drifting veil
+  {{fx:glaciate}}   a sheet of ice slides across, freezing the characters in place
+  {{fx:magma}}      molten heat spreads through the text and cools to black basalt
+  {{fx:windshear}}  a gust blows the characters sideways off their lines, then home
+  {{fx:thunderhead}} a storm cloud forms and throws bolts down into the lines
+  {{fx:sandbury}}   a dune rises and buries the text under drifting sand
+  {{fx:spores}}     toxic spores bloom out of the letters and drift off
+
 POINT EFFECT ARGS — optional, either or both, in any order:
   palette: mint · ice · gold · ember · violet · rose · mono
   size:    sm · md · lg · xl

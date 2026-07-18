@@ -339,23 +339,24 @@ test('the text-effects reference sheet covers every style span', () => {
   }
 });
 
-test('the vocabulary is the full 84 effects', () => {
+test('the vocabulary is the full 114 effects', () => {
   // The count is asserted because the installed .exe embeds its own copy of
   // prompt.js, so the vocabulary Claude actually has is the one in the BUILD,
   // not the one in the repo. A session once reported "all 40 verified" against
   // a repo holding 50. A bare number here is the cheapest way to make that
   // drift fail loudly instead of quietly.
-  // POINT_EFFECTS is 57: 32 + the twenty-five ASCII scenes. Both counts
-  // include names that no longer paint — a disabled effect keeps its name in
-  // the vocabulary so old transcripts don't print braces (retirement test).
-  assert.strictEqual(POINT_EFFECTS.size, 57);
+  // POINT_EFFECTS is 87: 47 non-scene point effects (incl. the 15 elemental
+  // particle ones) + the 40 ASCII scenes. Both counts include names that no
+  // longer paint — a disabled effect keeps its name so old transcripts don't
+  // print braces (retirement test).
+  assert.strictEqual(POINT_EFFECTS.size, 87);
   assert.strictEqual(STYLE_SPANS.size, 27);
   const { ASCII_EFFECTS, GRID_EFFECTS } = require('../src/flourish');
-  assert.strictEqual(ASCII_EFFECTS.size, 25);
-  // 17 grid effects: skull, banner, wireframe, plasma, tunnel, firewall, cat
-  // + the ten of volume II. Every one must also be an ASCII scene, or the
-  // dispatcher (which reads ASCII_EFFECTS) never reaches it.
-  assert.strictEqual(GRID_EFFECTS.size, 17);
+  assert.strictEqual(ASCII_EFFECTS.size, 40);
+  // 32 grid effects: the 17 through volume II + the 15 elemental grid effects.
+  // Every one must also be an ASCII scene, or the dispatcher (which reads
+  // ASCII_EFFECTS) never reaches it.
+  assert.strictEqual(GRID_EFFECTS.size, 32);
 });
 
 test('the consuming spans are taught with their guardrail', () => {

@@ -45,6 +45,11 @@ const POINT = [
   ['rain', 900], ['beam', 700], ['implode', 620],
   ['scanlines', 900], ['static', 300], ['vhs', 200], ['grid', 1200],
   ['circuit', 1400], ['tracer', 1400],
+  // Elemental particle set (volume III).
+  ['firebomb', 300], ['napalm', 700], ['blizzard', 900], ['electricity', 200],
+  ['smoke', 900], ['lava', 700], ['hail', 700], ['steam', 800], ['acid', 500],
+  ['sandstorm', 800], ['cinders', 1200], ['shockwave', 300], ['whirlwind', 700],
+  ['geyser', 600], ['venom', 1200],
 ];
 
 const SPANS = '{{fx:glow}}glow{{/fx:glow}} {{fx:shimmer}}shimmer{{/fx:shimmer}} '
@@ -268,6 +273,12 @@ async function run() {
     ['quake', 900],
     ['dvd', 2600],
     ['aquarium', 2200],
+    // Elemental grid set (volume III) — fired over prose so the front has text
+    // to transmute.
+    ['ignite', 1000], ['frostbite', 1300], ['corrode', 1500], ['electrify', 1700],
+    ['overgrow', 1500], ['rust', 1700], ['flood', 2200], ['petrify', 1200],
+    ['smokescreen', 2200], ['glaciate', 1300], ['magma', 1300], ['windshear', 900],
+    ['thunderhead', 2000], ['sandbury', 2600], ['spores', 1700],
   ];
   console.log('grid scenes (over prose, fired the way applyEvents fires them):');
   for (const [label, delay] of GRID_SHOTS) {

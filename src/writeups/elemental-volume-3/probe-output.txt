@@ -1,0 +1,53 @@
+=== counts ===
+scene       planned  painted  boxes  off-screen  own content   reaped 
+gibson       38       58503    3206   0           yes (glyphs)  yes     
+wardial      17       1195     0      0           17/17         yes     
+crack        8        1348     0      0           yes (glyphs)  yes     
+banner       235      0        0      0           yes (glyphs)  yes     
+sniffer      6        349      0      0           6/6           yes     
+trace        9        901      0      0           9/9           yes     
+daemon       15       1304     0      0           15/15         yes     
+portscan     32       2873     0      0           32/32         yes     
+skull        80       4709     0      0           yes (glyphs)  yes     
+overflow     6        887      0      0           6/6           yes     
+wireframe    6        12738    0      0           yes (glyphs)  yes     
+plasma       173      43785    0      0           yes (glyphs)  yes     
+tunnel       13       68242    0      0           yes (glyphs)  yes     
+firewall     1625     95838    0      0           yes (glyphs)  yes     
+cat          1        1097     0      0           yes (glyphs)  yes     
+snake        5        1974     0      0*          yes (own)     yes     
+invaders     24       4626     0      0*          yes (own)     yes     
+pacman       34       142      0      0           yes (own)     yes     
+ufo          3        176      0      2*          yes (own)     yes     
+blackhole    132      11616    0      0           yes (own)     yes     
+life         721      19405    0      0           yes (own)     yes     
+melt         721      35926    0      0           yes (own)     yes     
+quake        721      47613    0      0           yes (own)     yes     
+dvd          8        88       0      0*          yes (own)     yes     
+aquarium     5        678      0      0*          yes (own)     yes     
+ignite       721      41148    0      0           yes (front)   yes     
+frostbite    721      51903    0      0           yes (front)   yes     
+corrode      721      17614    0      0           yes (front)   yes     
+electrify    44       1354     0      0           yes (front)   yes     
+overgrow     721      33743    0      0           yes (front)   yes     
+rust         721      23229    0      0           yes (front)   yes     
+flood        721      10947    0      0           yes (front)   yes     
+petrify      721      35690    0      0           yes (front)   yes     
+smokescreen  721      167      0      0           yes (front)   yes     
+glaciate     721      25288    0      0           yes (front)   yes     
+magma        721      32201    0      0           yes (front)   yes     
+windshear    721      54696    0      5180*       yes (front)   yes     
+thunderhead  721      23132    0      0           yes (front)   yes     
+sandbury     721      10941    0      0           yes (front)   yes     
+spores       721      49657    0      0           yes (front)   yes     
+
+=== verdict ===
+scenes probed:                   40
+planned content:                 40/40
+actually painted to the canvas:  40/40
+every draw inside the viewport:  40/40 (* = motion, off-screen expected)
+painted their OWN content:       40/40
+reaped themselves:               40/40
+threw:                           0
+
+ALL FORTY SCENES PAINT WHAT THEY PLAN: yes

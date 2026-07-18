@@ -198,6 +198,8 @@ async function run() {
                     : S.kind === 'life' ? Array.from(S.alive).reduce((a, b) => a + b, 0)
                     : S.kind === 'aquarium' ? S.plan.fish.length
                     : S.kind === 'invaders' ? S.plan.cols * S.plan.rows
+                    : S.kind === 'electrify' ? S.path.length
+                    : S.kind === 'windshear' ? S.parts.length
                     : S.lines ? S.lines.length
                     : S.ink ? S.ink.length
                     : S.rows ? S.rows.length
@@ -383,6 +385,25 @@ async function run() {
       })();`);
     }
 
+    // Volume III: the elemental grid effects transmute the prose in place, so
+    // "own content" is a swathe of characters redrawn (recoloured, glyph-
+    // swapped, knocked out) in one frame — not a fixed sprite. The oracle: did
+    // the front actually transform a substantial patch this frame.
+    let vol3 = null;
+    const VOL3 = new Set(['ignite', 'frostbite', 'corrode', 'electrify', 'overgrow',
+      'rust', 'flood', 'petrify', 'smokescreen', 'glaciate', 'magma', 'windshear',
+      'thunderhead', 'sandbury', 'spores']);
+    if (VOL3.has(mid.kind)) {
+      vol3 = await js(`(function () {
+        const t = window.__tap, fx = window.__probe, S = fx.ascii[0];
+        if (!S) return { ok: false, want: 'a live scene', got: 'it was reaped early' };
+        const drawn = (t.lastFrame || []).length, fills = t.lastFills || 0;
+        return { ok: drawn >= 10 || fills >= 10,
+          got: drawn + ' glyphs / ' + fills + ' fills in one frame',
+          want: 'a transmuted swathe of prose' };
+      })();`);
+    }
+
     // The cat is the one scene whose evidence is MOTION: a cat that paints
     // beautifully and never moves is a sticker. Sits are legitimate and last
     // up to ~2.2s, so the window has to be wider than any sit — sample for 4s
@@ -410,14 +431,15 @@ async function run() {
     // oracle fits its shape.
     const faithful = charOracle ? charOracle.ok
       : vol2 ? vol2.ok
-        : mid.want ? mid.hit === mid.want
-          : null;
+        : vol3 ? vol3.ok
+          : mid.want ? mid.hit === mid.want
+            : null;
 
     results.push({
       name, kind: r.kind, planned: r.planned,
       painted: mid.painted, rects: mid.rects, fills: mid.fills, off: mid.off,
       distinct: mid.distinct, want: mid.want, hit: mid.hit,
-      faithful, charOracle, vol2, catMoved, fontUnparsed: mid.fontUnparsed,
+      faithful, charOracle, vol2, vol3, catMoved, fontUnparsed: mid.fontUnparsed,
       reaped: end.alive === 0,
       err: r.err || mid.err || end.err,
     });
@@ -431,19 +453,23 @@ async function run() {
   // frame — fish swimming in, a saucer flying on, shots leaving the top. For
   // these an off-screen draw IS the effect working, so the off-screen==0 gate
   // doesn't apply to them (the faithfulness oracle still does).
-  const MOTION = new Set(['aquarium', 'ufo', 'snake', 'dvd', 'invaders']);
+  const MOTION = new Set(['aquarium', 'ufo', 'snake', 'dvd', 'invaders', 'windshear']);
   let bad = 0;
   for (const r of results) {
     const own = r.charOracle ? (r.charOracle.ok ? 'yes (glyphs)' : 'NO')
       : r.vol2 ? (r.vol2.ok ? 'yes (own)' : 'NO')
-        : r.want ? `${r.hit}/${r.want}` : '(none)';
-    console.log(pad(r.name, 11), pad(r.planned, 8), pad(r.painted, 8), pad(r.rects, 6),
+        : r.vol3 ? (r.vol3.ok ? 'yes (front)' : 'NO')
+          : r.want ? `${r.hit}/${r.want}` : '(none)';
+    console.log(pad(r.name, 12), pad(r.planned, 8), pad(r.painted, 8), pad(r.rects, 6),
       pad(MOTION.has(r.name) ? r.off + '*' : r.off, 11), pad(own, 13), pad(r.reaped ? 'yes' : 'NO', 7), r.err ? 'THREW' : '');
     if (r.charOracle && !r.charOracle.ok) {
       console.log('      wanted', JSON.stringify(r.charOracle.want), 'got', JSON.stringify(r.charOracle.got));
     }
     if (r.vol2 && !r.vol2.ok) {
       console.log('      wanted', JSON.stringify(r.vol2.want), 'got', JSON.stringify(r.vol2.got));
+    }
+    if (r.vol3 && !r.vol3.ok) {
+      console.log('      wanted', JSON.stringify(r.vol3.want), 'got', JSON.stringify(r.vol3.got));
     }
     // A grid banner is fillRect blocks with knockout glyphs — fills count as
     // paint, or a working banner reads as a blank one.
@@ -470,7 +496,7 @@ async function run() {
   console.log('painted their OWN content:      ', pct((r) => r.faithful !== false));
   console.log('reaped themselves:              ', pct((r) => r.reaped));
   console.log('threw:                          ', results.filter((r) => r.err).length);
-  console.log(bad === 0 ? '\nALL TWENTY-FIVE SCENES PAINT WHAT THEY PLAN: yes' : `\nBROKEN SCENES: ${bad}`);
+  console.log(bad === 0 ? '\nALL FORTY SCENES PAINT WHAT THEY PLAN: yes' : `\nBROKEN SCENES: ${bad}`);
 
   win.destroy();
   app.exit(bad === 0 ? 0 : 1);

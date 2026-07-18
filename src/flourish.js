@@ -57,6 +57,11 @@
     'wireframe', 'plasma', 'tunnel', 'firewall', 'cat',
     'snake', 'invaders', 'pacman', 'ufo', 'blackhole',
     'life', 'melt', 'quake', 'dvd', 'aquarium',
+    // elemental grid effects (volume III): a front sweeps across the prose and
+    // transmutes it — burns, freezes, corrodes, floods, buries.
+    'ignite', 'frostbite', 'corrode', 'electrify', 'overgrow',
+    'rust', 'flood', 'petrify', 'smokescreen', 'glaciate',
+    'magma', 'windshear', 'thunderhead', 'sandbury', 'spores',
   ]);
 
   // The grid register: effects that are painted INTO the terminal's own
@@ -75,6 +80,9 @@
     'skull', 'banner', 'wireframe', 'plasma', 'tunnel', 'firewall', 'cat',
     'snake', 'invaders', 'pacman', 'ufo', 'blackhole',
     'life', 'melt', 'quake', 'dvd', 'aquarium',
+    'ignite', 'frostbite', 'corrode', 'electrify', 'overgrow',
+    'rust', 'flood', 'petrify', 'smokescreen', 'glaciate',
+    'magma', 'windshear', 'thunderhead', 'sandbury', 'spores',
   ]);
 
   // Which directive names are point effects vs. wrapping style spans.
@@ -85,6 +93,10 @@
     'frost', 'bloom', 'rain', 'beam', 'implode',
     'scanlines', 'static', 'vhs', 'grid', 'circuit', 'tracer',
     'apophenia', 'dilate',
+    // elemental particle effects (volume III)
+    'firebomb', 'napalm', 'blizzard', 'electricity', 'smoke',
+    'lava', 'hail', 'steam', 'acid', 'sandstorm',
+    'cinders', 'shockwave', 'whirlwind', 'geyser', 'venom',
     ...ASCII_EFFECTS,
   ]);
 
@@ -1655,6 +1667,29 @@
     return { fish, bubbleP: 0.06 };
   }
 
+  // ---- elemental grid effects (volume III): planners ----
+  //
+  // These transmute the on-screen text, so most of the behaviour is procedural
+  // over a grid the tests can't see. The planner seeds pace, settle time and
+  // direction; the transform (which glyph, which colour) lives in effects.js.
+  // Each returns a plain params object so _gridScene has something truthy to
+  // fire, and so a test can pin the numbers.
+  function planIgnite(rnd) { const r = rnd || Math.random; return { speed: 0.85 + r() * 0.5, settle: 520 }; }
+  function planFrostbite(rnd) { const r = rnd || Math.random; return { speed: 0.6 + r() * 0.4, settle: 700 }; }
+  function planCorrode(rnd) { const r = rnd || Math.random; return { speed: 0.7 + r() * 0.4, settle: 640 }; }
+  function planElectrify(rnd) { const r = rnd || Math.random; return { stepMs: 45 + r() * 30, flare: 360 }; }
+  function planOvergrow(rnd) { const r = rnd || Math.random; return { speed: 0.5 + r() * 0.35, settle: 820 }; }
+  function planRust(rnd) { const r = rnd || Math.random; return { speed: 0.7 + r() * 0.4, settle: 900, dir: r() < 0.5 ? 1 : -1 }; }
+  function planFlood(rnd) { const r = rnd || Math.random; return { rise: 0.05 + r() * 0.03 }; }
+  function planPetrify(rnd) { const r = rnd || Math.random; return { speed: 0.75 + r() * 0.4, settle: 650 }; }
+  function planSmokescreen(rnd) { const r = rnd || Math.random; return { rise: 0.045 + r() * 0.03 }; }
+  function planGlaciate(rnd) { const r = rnd || Math.random; return { speed: 0.9 + r() * 0.5, settle: 600, dir: r() < 0.5 ? 1 : -1 }; }
+  function planMagma(rnd) { const r = rnd || Math.random; return { speed: 0.8 + r() * 0.5, settle: 720 }; }
+  function planWindshear(rnd) { const r = rnd || Math.random; return { gust: 900, ret: 1500, dir: r() < 0.5 ? 1 : -1 }; }
+  function planThunderhead(rnd) { const r = rnd || Math.random; return { strikeMs: 260 + r() * 160 }; }
+  function planSandbury(rnd) { const r = rnd || Math.random; return { rise: 0.05 + r() * 0.03, dir: r() < 0.5 ? 1 : -1 }; }
+  function planSpores(rnd) { const r = rnd || Math.random; return { speed: 0.55 + r() * 0.4, settle: 900 }; }
+
   return {
     FlourishParser, POINT_EFFECTS, STYLE_SPANS, PER_CHAR_SPANS, CONSUMING_SPANS,
     MUTATING_SPANS, SCRIPTED_SPANS, RENDERER_EFFECTS, DISABLED_EFFECTS,
@@ -1677,5 +1712,8 @@
     CAT_W, CAT_FRAMES, mirrorCatFrame, planCat,
     planSnake, INVADER, CANNON, planInvaders, planPacman, SAUCER, planUfo,
     planBlackhole, planLife, stepLife, planMelt, planQuake, planDvd, planAquarium,
+    planIgnite, planFrostbite, planCorrode, planElectrify, planOvergrow,
+    planRust, planFlood, planPetrify, planSmokescreen, planGlaciate,
+    planMagma, planWindshear, planThunderhead, planSandbury, planSpores,
   };
 });

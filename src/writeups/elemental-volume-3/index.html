@@ -1,0 +1,116 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flourish — volume III: thirty elemental effects</title>
+<style>
+  body{background:#0a1420;color:#cbd5e1;font:15px/1.65 system-ui,sans-serif;max-width:900px;margin:0 auto;padding:28px}
+  h1{font-size:23px;color:#e2e8f0} h2{font-size:16px;color:#7dd3fc;margin-top:32px;border-bottom:1px solid #1e3850;padding-bottom:4px}
+  code,pre{font-family:ui-monospace,monospace} pre{background:#0c1825;border:1px solid #1e3850;border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;line-height:1.5}
+  .bad{color:#f87171} .good{color:#34d399} .warn{color:#e0b54a}
+  table{border-collapse:collapse;margin:12px 0;font-size:13.5px} td,th{border:1px solid #26405a;padding:5px 11px;text-align:left} th{color:#9fd5e6;background:#0e1c2a}
+  .meta{color:#94a3b8;font-size:13px}
+  figure{margin:16px 0;background:#0c1825;border:1px solid #1e3850;border-radius:10px;padding:10px}
+  figure img{width:100%;display:block;border-radius:6px} figcaption{color:#94a3b8;font-size:12.5px;margin-top:6px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.two{grid-template-columns:1fr}}
+  blockquote{border-left:3px solid #26405a;margin:12px 0;padding:2px 0 2px 14px;color:#a8c0d0}
+  .back{display:inline-block;margin-bottom:18px;color:#94a3b8;text-decoration:none;font-size:13px}
+  .back:hover{color:#e0b54a}
+</style></head><body>
+
+<a class="back" href="../index.html">&larr; back to writeups</a>
+
+<h1>Volume III: thirty elemental effects</h1>
+<p class="meta">Branch <code>main</code> · flourish.js, effects.js, prompt.js, tools/ascii-probe.js, tools/fx-shots.js, test/*.js · 2026-07-17</p>
+
+<h2>The ask</h2>
+<blockquote>"add 30 more effects, should be element themed, include firebomb, napalm, blizzard, electricity,
+smoke, etc… half of them should be [grid] based."</blockquote>
+
+<p>Fifteen <b>particle</b> effects on the canvas engine, and fifteen <b>grid</b> effects that transmute
+the on-screen prose — the elements, done both ways.</p>
+
+<h2>The particle fifteen</h2>
+<p>Random bursts on the existing particle system (like spark/nova), so no seeded planner — the variety
+is in the physics. Colours are hex, because every particle goes through <code>glowSprite</code> which
+parses hex; an <code>hsl()</code> string there draws nothing.</p>
+<table>
+<tr><td><code>firebomb</code></td><td>fireball: flash + blast rings + rising embers</td>
+<td><code>napalm</code></td><td>sticky fire on arcs that fall and cling</td></tr>
+<tr><td><code>blizzard</code></td><td>driving snow across the screen</td>
+<td><code>electricity</code></td><td>branching arcs crackling from a point</td></tr>
+<tr><td><code>smoke</code></td><td>grey plumes billowing up</td>
+<td><code>lava</code></td><td>molten globs bubbling and falling</td></tr>
+<tr><td><code>hail</code></td><td>hard ice pellets hammering down</td>
+<td><code>steam</code></td><td>fine vapour hissing upward</td></tr>
+<tr><td><code>acid</code></td><td>corrosive droplets spitting and sizzling</td>
+<td><code>sandstorm</code></td><td>a wall of dust driving across</td></tr>
+<tr><td><code>cinders</code></td><td>glowing cinders drifting DOWN (embers rise)</td>
+<td><code>shockwave</code></td><td>concentric pressure rings</td></tr>
+<tr><td><code>whirlwind</code></td><td>a flat swirl of debris (polar mode)</td>
+<td><code>geyser</code></td><td>a jet of water erupting and arcing back</td></tr>
+<tr><td><code>venom</code></td><td>a toxic cloud that SINKS and pools</td><td></td><td></td></tr>
+</table>
+
+<h2>The grid fifteen</h2>
+<p>These transmute the text in place. The shared machinery is a <b>spreading front</b>
+(<code>_frontScene</code> / <code>_drawFront</code>): every occupied cell gets an arrival time from a
+distance function — radial from the caret, inward from the edges, directional, a rising waterline — and
+once the front reaches a cell the draw transforms it, recolouring the real character, swapping its glyph,
+or eating it into a hole. Nine effects use it; six have bespoke mechanics (an arc that walks
+character-to-character, a rising waterline, a smoke bank, a sideways gust, a strike-throwing cloud, a
+burying dune). All of it is canvas over untouched DOM, so the prose is whole when it fades.</p>
+<table>
+<tr><td><code>ignite</code></td><td>fire spreads from the caret; characters char to ash</td>
+<td><code>frostbite</code></td><td>frost creeps in from the edges to ice-blue</td></tr>
+<tr><td><code>corrode</code></td><td>acid pits the letters into dots, then holes</td>
+<td><code>electrify</code></td><td>an arc random-walks letter to letter, flaring each</td></tr>
+<tr><td><code>overgrow</code></td><td>green vines climb the lines, sprouting between words</td>
+<td><code>rust</code></td><td>the text oxidises across, orange-brown, flaking</td></tr>
+<tr><td><code>flood</code></td><td>a waterline rises; covered prose goes wavy blue</td>
+<td><code>petrify</code></td><td>the text turns to grey stone from a point</td></tr>
+<tr><td><code>smokescreen</code></td><td>smoke wells up and thins the text out</td>
+<td><code>glaciate</code></td><td>an ice sheet slides across, freezing letters</td></tr>
+<tr><td><code>magma</code></td><td>molten heat spreads and cools to black basalt</td>
+<td><code>windshear</code></td><td>a gust blows the characters sideways, then home</td></tr>
+<tr><td><code>thunderhead</code></td><td>a storm cloud forms and strikes down into the lines</td>
+<td><code>sandbury</code></td><td>a dune rises and buries the text under sand</td></tr>
+<tr><td><code>spores</code></td><td>toxic spores bloom off the letters and drift</td><td></td><td></td></tr>
+</table>
+
+<div class="two">
+<figure><img src="firebomb.png" alt="firebomb"><figcaption><code>firebomb</code> — flash, two blast rings, a core of fire and rising embers.</figcaption></figure>
+<figure><img src="scene-ignite.png" alt="ignite"><figcaption><code>ignite</code> — the fire front sweeping out from the caret, the prose charring orange to ash.</figcaption></figure>
+<figure><img src="scene-corrode.png" alt="corrode"><figcaption><code>corrode</code> — the acid has eaten the letters into dots and holes.</figcaption></figure>
+<figure><img src="scene-flood.png" alt="flood"><figcaption><code>flood</code> — a waterline with a <code>~</code> surface; the prose below it wavy and blue.</figcaption></figure>
+<figure><img src="scene-thunderhead.png" alt="thunderhead"><figcaption><code>thunderhead</code> — a cloud band across the top and a bolt striking down into the lines.</figcaption></figure>
+<figure><img src="scene-windshear.png" alt="windshear"><figcaption><code>windshear</code> — the characters blown sideways off their lines by the gust.</figcaption></figure>
+</div>
+
+<h2>Verification, and the two the probe caught</h2>
+<p>Plan-pure / probe-paint / look-anyway, as ever. 220 unit tests (every elemental planner sane at seven
+seeds; every grid effect wired to a reachable planner). <code>ascii-probe</code> extended with a
+faithfulness oracle for the transmuting effects — "did the front transform a real swathe of prose this
+frame" — and a motion exemption for <code>windshear</code> (it blows characters off the edge on purpose):
+<span class="good">verdict 40/40 planned / painted / faithful / reaped</span>
+(<a href="probe-output.txt">full output</a>). Then a representative sample read as screenshots.</p>
+<p>Two defects, both surfaced by the probe:</p>
+<ol>
+<li><b>thunderhead never reaped.</b> Its scene carried a numeric <code>rows</code> array, which collides
+with the banner's string <code>rows</code> in the probe's reveal-timing oracle
+(<code>S.rows[0].length</code> → NaN → it sampled at t=0, so the end-of-life wait fired before the scene
+actually ended). The exact same number-vs-array field collision that bit <code>life</code> and
+<code>invaders</code> in volume II. Renamed the field to <code>rowKeys</code>. <b>Three times now</b> —
+a shared field name across effects is a standing trap; the lesson is to name grid-dimension fields
+distinctly (<code>lcols</code>/<code>rowKeys</code>) so a number can never sit where an array is
+expected.</li>
+<li><b>sandbury painted nothing.</b> The probe's prose only fills the top ~13 lines, and the dune rises
+from the bottom — so at the mid-life sample it hadn't reached any text yet and drew zero. Gave the dune
+a visible <b>surface line</b> of sand across the width every frame, so it's engaged (and better looking)
+long before it reaches the prose.</li>
+</ol>
+
+<p class="meta">Vocabulary now 114 effects (POINT 87, STYLE 27; of the points, 40 are ASCII/grid scenes,
+32 of those grid). prompt.js teaches all thirty; it's baked into the server, so they go live on the next
+<code>flourish</code> restart.</p>
+
+</body></html>
